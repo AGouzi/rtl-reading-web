@@ -9,9 +9,9 @@
 
 ## 1. 审计范围
 
-共 19 个文件，约 616 KB：
+共 20 个文件，约 618 KB：
 
-- 15 个文本文件：`SKILL.md`、`README.md`、`LICENSE`、`.gitignore`、4 个 `references/*.md`、`docs/` 下 2 个 Markdown、`agents/openai.yaml`、`assets/reference-reader/` 下的 HTML/CSS/JS
+- 16 个文本文件：`SKILL.md`、`README.md`、`LICENSE`、`.gitignore`、4 个 `references/*.md`、`docs/` 下 3 个 Markdown、`agents/openai.yaml`、`assets/reference-reader/` 下的 HTML/CSS/JS
 - 4 张 PNG 截图，全部来自虚构示例 `demo_pipeline`
 
 审计包括源码、文档、示例数据、HTML 注释、CSS、JavaScript、YAML、资源引用和截图内容。

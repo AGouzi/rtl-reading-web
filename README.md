@@ -234,6 +234,7 @@ rtl-reading-web/
 ├── assets/reference-reader/     # 可离线打开的参考工作台
 ├── docs/
 │   ├── wechat-article.md        # 公众号推文
+│   ├── wechat-publish-notes.md  # 配图与排版备注
 │   ├── security-audit.md        # 发布前审计
 │   └── screenshots/             # 虚构示例截图
 └── README.md

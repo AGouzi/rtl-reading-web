@@ -368,7 +368,7 @@ endmodule`
     }
   },
   validation: {
-    summary: { benches: 4, cases: 16, checks: 48, status: "虚构示例" },
+    summary: { benches: 3, cases: 9, checks: 27, status: "虚构示例" },
     benches: [
       { name: "tb_pipeline_unit", purpose: "输入检查、路由与响应的单元路径", cases: ["U1 正常请求", "U2 操作码非法", "U3 响应反压"] },
       { name: "tb_status_counter", purpose: "计数递增与复位", cases: ["C1 单事件", "C2 连续事件", "C3 复位清零"] },

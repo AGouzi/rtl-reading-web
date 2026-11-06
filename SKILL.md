@@ -1,6 +1,6 @@
 ---
 name: rtl-reading-web
-description: "Generate or improve a Chinese RTL code-reading website from Verilog, SystemVerilog, or VHDL sources. Use for guided module, transaction, signal, source-code, and optional waveform explanations with traceable evidence. Do not use for RTL implementation, simulation-only tasks, or a prose-only design document."
+description: "Generate or improve a Chinese RTL code-reading website from Verilog, SystemVerilog, or VHDL sources, for quickly understanding AI-generated code or unfamiliar code written by others. Use for guided module, transaction, signal, source-code, and optional waveform explanations with traceable evidence. Do not use for RTL implementation, simulation-only tasks, or a prose-only design document."
 ---
 
 # RTL 代码阅读网页

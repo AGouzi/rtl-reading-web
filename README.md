@@ -1,10 +1,33 @@
 # RTL Reading Web
 
-**把 RTL 变成一张能点回源码的阅读工作台。**
+**代码写快了，读的人得有工具跟上。**
 
-给 AI 编码助手一个技能：输入 Verilog / SystemVerilog / VHDL，输出一个可离线打开的中文阅读网页。它不写一篇“看起来懂了”的长文，而是把**模块层级、一笔事务、关键信号、源码行号**放在同一张工作台上。
+给 AI 编码助手一个技能：输入 Verilog / SystemVerilog / VHDL，输出一个可离线打开的中文阅读工作台。**模块层级、一笔事务、关键信号、源码行号**放在同一页上，读的人不用在编辑器、波形、文档和聊天窗口之间来回找。
+
+它服务两类最常见的阅读：**AI 生成的 RTL**，和**别人写的 RTL**（交接、代码评审、第三方 IP）。
 
 ![RTL Reading Web 总览](docs/screenshots/overview.png)
+
+---
+
+## 两类阅读，同一张工作台
+
+### AI 写完的代码
+
+生成一段 RTL 只要几分钟，把它读明白要的时间更长。模型记得住上下文，人记不住：某个标志为什么在这一拍清零，某个长度为什么卡在这个区间，答案都在代码里，只是散在几千行的不同位置。
+
+工作台先把生成结果过一遍结构，让阅读从主路径而不是第 1 行开始：
+
+- 一笔请求从进来到出去，分成几段，每段的触发条件是什么
+- 信号点一下就有用途、生效条件、复位、更新和消费者
+- 每条结论带文件名和行号，可以直接回源码核对
+- 生成一次，之后回看都是本地打开一个静态网页
+
+### 别人写的代码
+
+交接、评审、接手第三方 IP 时，注释可能过期，文档可能缺失，能信的只有源码本身。工作台把阅读过程固定成可复核的路径：谁调用了这个信号，这个分支在什么条件下成立，这段代码影响哪些输出。
+
+结论和证据绑定同一份源码快照（SHA-256 记录在 `source-manifest.json`），读到的行号对得上当前代码。生成的静态目录可以直接发给同事，让对方按同样的路径读一遍，省略口头讲解。
 
 ---
 
@@ -89,11 +112,11 @@ RTL Reading Web 换了一个交付物：**不是文档，是工作台**。
 
 不合格：
 
-> `route_active` 是控制/状态标志，控制流程的启动、保持或结束。
+> `resp_valid` 是控制/状态标志，控制流程的启动、保持或结束。
 
 合格：
 
-> `route_active` 标记已接受请求的载荷路由仍在占用；为 0 时阻止载荷被继续接收。请求握手置位，尾拍握手清零。
+> `resp_valid` 表示当前响应仍待下游接收；下游未接收时保持原值，与 `resp_ready` 同时为 1 才完成一次响应。
 
 每个重点信号至少要回答：**用途、生效时机、复位、更新、来源、影响**。
 
@@ -182,10 +205,10 @@ doc/rtl-reading-web/
 
 ## 适合谁
 
-- 接手陌生 RTL、需要快速建立全貌的 FPGA / ASIC 工程师
+- 要接手、维护 AI 生成的大段 RTL，需要尽快读懂的人
+- 接手陌生模块、同事交接代码或第三方 IP 的 FPGA / ASIC 工程师
 - 需要给同事、评审或新人做代码讲解的人
-- 想让 AI 辅助阅读，但不想接受“无依据总结”的团队
-- 需要把阅读结果沉淀成可离线分享材料的人
+- 想把阅读结果沉淀成可离线分享材料的团队
 
 ## 不适合谁
 
@@ -270,7 +293,9 @@ Verilog、SystemVerilog 和 VHDL。具体解析深度取决于源码中的宏、
 
 RTL Reading Web is an agent skill that turns Verilog, SystemVerilog, or VHDL sources into a traceable, offline Chinese reading workbench.
 
-Instead of producing a long, confident-sounding summary, it generates a seven-tab static site:
+It targets two common cases: reading RTL that an AI just generated, and reading RTL written by someone else — inherited modules, review targets, or third-party IP.
+
+Instead of a long, confident-sounding summary, it generates a seven-tab static site:
 
 - Overview
 - Module hierarchy

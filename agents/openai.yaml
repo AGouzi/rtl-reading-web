@@ -1,0 +1,4 @@
+interface:
+  display_name: "RTL 代码阅读网页"
+  short_description: "根据 RTL 生成简洁且可追溯的阅读网页，串联模块、流程、信号与源码"
+  default_prompt: "使用 $rtl-reading-web，根据指定 RTL 生成简洁、有阅读引导、可跳转源码的中文网页。"

@@ -230,7 +230,7 @@ Copy-Item -Recurse .\rtl-reading-web .agents\skills\
 
 生成后直接打开 `doc/rtl-reading-web/index.html`。
 
-没有 npm install，没有后端，没有 API Key，没有 CDN。整个目录拷走就能离线看。
+参考实现没有 npm install，没有后端，没有 API Key，没有 CDN。整个目录拷走就能离线看；如果你的页面用了需要 HTTP 的功能，交付时会给出启动命令。
 
 ---
 

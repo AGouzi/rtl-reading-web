@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>demo_pipeline · RTL 阅读工作台</title>
+<link rel="stylesheet" href="style.css">
+<script>
+(function(){
+  try{
+    var t = localStorage.getItem('demo-reader-theme');
+    if(!t) t = 'light';
+    document.documentElement.dataset.theme = (t === 'dark' ? 'dark' : 'light');
+  }catch(e){ document.documentElement.dataset.theme = 'light'; }
+})();
+</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">DP</div>
+    <div class="brand-txt">
+      <div class="t1">demo_pipeline</div>
+      <div class="t2">RTL 阅读工作台</div>
+    </div>
+  </div>
+  <button class="btn sm panel-toggle" id="navToggle" aria-controls="sidebar" aria-expanded="false">目录</button>
+  <nav id="tabs" class="tabs" aria-label="阅读章节"></nav>
+  <div class="chips">
+    <button class="btn sm" id="themeBtn" title="切换深/浅色">深色</button>
+  </div>
+  <button class="btn sm panel-toggle" id="inspToggle" aria-controls="inspector" aria-expanded="false">详情</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar" aria-label="工程目录">
+    <div class="mobile-panel-head">工程目录<button class="btn sm" data-close-panel="nav" aria-label="关闭目录">关闭</button></div>
+    <div class="side-sec">
+      <h4>模块</h4>
+      <div id="modTree" class="tree"></div>
+    </div>
+    <div class="side-sec grow">
+      <h4>信号索引 <span class="mini" id="sigCount"></span></h4>
+      <input id="sigSearch" class="search" placeholder="搜索信号名…" aria-label="搜索信号">
+      <div id="sigList" class="siglist"></div>
+    </div>
+    <details class="side-sec file-section">
+      <summary>源码文件 <span class="mini" id="fileCount"></span></summary>
+      <div id="fileTree" class="tree"></div>
+    </details>
+  </aside>
+
+  <main id="main" class="main"></main>
+
+  <aside class="inspector" id="inspector" aria-label="阅读详情">
+    <div class="insp-head"><span id="inspType">详情</span><button class="btn sm panel-close" data-close-panel="inspector" aria-label="关闭详情">关闭</button></div>
+    <div id="inspBody" class="insp-body" tabindex="-1"></div>
+  </aside>
+</div>
+<button id="panelBackdrop" class="panel-backdrop" aria-label="关闭侧栏" tabindex="-1"></button>
+
+<footer class="statusbar">
+  <div id="crumb" class="crumb">总览</div>
+  <div class="hint" id="hint">选择模块或信号查看详情</div>
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -6,8 +6,6 @@
 
 它服务两类最常见的阅读：**AI 生成的 RTL**，和**别人写的 RTL**（交接、代码评审、第三方 IP）。
 
-![RTL Reading Web 总览](docs/screenshots/overview.png)
-
 ---
 
 ## 两类阅读，同一张工作台
@@ -58,33 +56,23 @@ RTL Reading Web 换了一个交付物：**不是文档，是工作台**。
 
 首屏只有一句任务说明、三个阅读入口、一张主结构图。没有统计卡墙，没有第二张同等级大图，也没有把侧栏信号复制一遍。
 
-![总览](docs/screenshots/overview.png)
-
 ### 2. 模块结构：从顶层下钻到数据、控制与缓存
 
 顶层图回答“请求经过哪几个模块”。点进任一模块，中央图就地换成该模块的内部通路：数据、控制、状态分带，BRAM/FIFO、MUX、状态机、计数器和错误出口用不同形状标出。节点绑真实信号，`L` 行号直接回源码。
-
-![模块结构](docs/screenshots/structure.png)
 
 ### 3. 数据流：跟踪一笔真实事务
 
 从被接收到被处理、等待、完成或失败，每一步都给出条件和下一状态。不是把所有 `always` 块画成平行流程。
 
-![数据流](docs/screenshots/dataflow.png)
-
 ### 4. 代码导航：关键结论都能点回行号
 
 信号、常量、模块和关键条件都可以定位到真实源码。常量按编译期对象解释，给出取值、声明和引用位置；从详情跳到代码或证据行时，右栏保持当前对象，不会切回模块上下文。跳转后目录同步、目标行进入可视区并高亮，用户始终知道自己在哪里。
-
-![代码导航](docs/screenshots/code.png)
 
 ### 5. 仿真验证：没有报告就不生成通过率
 
 没有报告就不生成通过率、覆盖率或“已验证”徽标。有报告时也标清数据源、日期、配置和适用范围。
 
-![仿真验证](docs/screenshots/verify.png)
-
-> 以上截图来自内置的虚构示例 `demo_pipeline`，所有 RTL、信号和验证记录均为合成内容，不对应任何真实项目。
+> 仓库内置虚构示例 `demo_pipeline`，可直接打开 `assets/reference-reader/index.html` 查看完整页面；示例 RTL、信号和验证记录均为合成内容，不对应任何真实项目。
 
 ---
 
@@ -245,7 +233,7 @@ doc/rtl-reading-web/
 
 发布或转发前建议按 [`references/portability.md`](references/portability.md) 的脱敏规则复查：真实项目名、客户名、型号、内部路径、主机名、账号、密钥、仓库地址和专有协议字段都不应进入分享包。
 
-本仓库的审计记录见 [`docs/security-audit.md`](docs/security-audit.md)。
+仓库只包含技能、使用说明和虚构示例；真实项目源码、截图、波形、验证报告和本地发布材料不进入公开仓库。
 
 ---
 
@@ -261,11 +249,7 @@ rtl-reading-web/
 │   ├── acceptance.md            # 验收标准
 │   └── portability.md           # 迁移、分享与脱敏
 ├── assets/reference-reader/     # 可离线打开的参考工作台
-├── docs/
-│   ├── wechat-article.md        # 公众号推文
-│   ├── wechat-publish-notes.md  # 配图与排版备注
-│   ├── security-audit.md        # 发布前审计
-│   └── screenshots/             # 虚构示例截图
+├── LICENSE
 └── README.md
 ```
 
@@ -337,4 +321,4 @@ Focus: trace one write request end to end, including backpressure.
 
 [MIT](LICENSE)
 
-示例工程与截图均为虚构内容，仅用于展示阅读工作台的结构和交互。
+示例工程为虚构内容，仅用于展示阅读工作台的结构和交互。

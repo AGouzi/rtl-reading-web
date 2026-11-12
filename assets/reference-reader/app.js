@@ -228,6 +228,159 @@
     </svg>`;
   }
 
+  const DEMO_KIND = { fsm: "FSM", mem: "MEM", mux: "MUX", cnt: "CNT", decode: "DEC", reg: "REG", out: "IO" };
+
+  function demoNode(o) {
+    const x = o.x, y = o.y, w = o.w || 150, h = o.h || 56, kind = o.kind || "proc";
+    const signal = o.signal && D.signals[o.signal] ? D.signals[o.signal] : null;
+    const line = signal ? signal.line : null;
+    let shape;
+    if (kind === "mux") {
+      shape = `<polygon points="${x + 14},${y} ${x + w - 14},${y} ${x + w},${y + h} ${x},${y + h}"/>`;
+    } else if (kind === "decode") {
+      shape = `<polygon points="${x + 10},${y} ${x + w},${y} ${x + w},${y + h - 10} ${x + w - 10},${y + h} ${x},${y + h} ${x},${y + 10}"/>`;
+    } else {
+      shape = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${kind === "fsm" ? 14 : 6}"/>`;
+    }
+    const tag = DEMO_KIND[kind] || "";
+    const ty = y + h / 2 + (o.sub ? -3 : 4);
+    return `<g class="inode ${kind}${o.signal ? " clickable" : ""}"${o.signal ? ` data-signal="${o.signal}" role="button" tabindex="0"` : ""}>
+      <title>${esc(o.tip || o.t)}${line ? ` · L${line}` : ""}</title>
+      ${shape}
+      ${kind === "mem" ? `<path class="ibank" d="M${x + 10},${y + 9} H${x + w - 10} M${x + 10},${y + 14} H${x + w - 10}"/>` : ""}
+      ${tag ? `<text class="itag" x="${x + w - 8}" y="${y + 12}" text-anchor="end">${tag}</text>` : ""}
+      <text class="it" x="${x + w / 2}" y="${ty}" text-anchor="middle">${esc(o.t)}</text>
+      ${o.sub ? `<text class="is" x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle">${esc(o.sub)}</text>` : ""}
+      ${kind === "cnt" ? `<text class="iplus" x="${x + 9}" y="${y + h - 7}">+1</text>` : ""}
+    </g>${line ? `<text class="ijump" data-code="${esc(signal.file)}" data-line="${line}" x="${x + 8}" y="${y + 12}">L${line}</text>` : ""}`;
+  }
+
+  function demoWire(d, cls = "") {
+    const mark = cls.includes("err") ? "dare" : cls.includes("dash") ? "dard" : "dar";
+    return `<path class="wire ${cls}" d="${d}" marker-end="url(#${mark})"/>`;
+  }
+  function demoLabel(x, y, text) {
+    return `<text class="wlabel" x="${x}" y="${y}">${esc(text)}</text>`;
+  }
+  function demoBand(b) {
+    return `<rect class="iband" x="16" y="${b.y}" width="948" height="${b.h}" rx="10"/>
+      <text class="iband-t" x="30" y="${b.y + 18}">${esc(b.t)}</text>`;
+  }
+
+  const DEMO_INTERNALS = {
+    ingress_stage: {
+      h: 360,
+      bands: [
+        { y: 50, h: 142, t: "数据通路  DATA" },
+        { y: 208, h: 132, t: "控制  CONTROL" }
+      ],
+      nodes: [
+        { x: 92, y: 88, w: 122, h: 56, kind: "out", t: "req_valid", sub: "请求有效", signal: "req_valid" },
+        { x: 258, y: 76, w: 180, h: 80, kind: "reg", t: "输入采样", sub: "req_valid_i · 描述符", tip: "在时钟沿采样请求" },
+        { x: 482, y: 88, w: 130, h: 56, kind: "out", t: "req_ready", sub: "接收许可", signal: "req_ready" },
+        { x: 258, y: 232, w: 170, h: 64, kind: "decode", t: "opcode == 0", sub: "非法操作码判定", signal: "req_opcode" },
+        { x: 472, y: 232, w: 160, h: 64, kind: "reg", t: "错误锁存", sub: "req_error = 0x01", signal: "req_error" },
+        { x: 676, y: 232, w: 150, h: 64, kind: "out", t: "格式错误", sub: "只影响当前请求", tip: "错误码在下一拍进入路由判断" }
+      ],
+      wires: [
+        demoWire("M214,116 H258"), demoLabel(216,108,"valid"),
+        demoWire("M438,116 H482"), demoLabel(440,108,"sample"),
+        demoWire("M343,232 V200 H343 V156","dash"), demoLabel(349,190,"opcode"),
+        demoWire("M428,264 H472","err"), demoLabel(430,256,"bad"),
+        demoWire("M632,264 H676","err")
+      ],
+      note: "示例只在请求有效拍判断 opcode；req_ready 复位后保持 1。"
+    },
+    work_router: {
+      h: 370,
+      bands: [
+        { y: 50, h: 132, t: "请求与任务  DATA" },
+        { y: 198, h: 146, t: "握手与错误  CONTROL" }
+      ],
+      nodes: [
+        { x: 92, y: 82, w: 120, h: 54, kind: "out", t: "req_valid", sub: "请求有效", signal: "req_valid" },
+        { x: 92, y: 148, w: 120, h: 54, kind: "out", t: "req_error", sub: "格式错误", signal: "req_error" },
+        { x: 258, y: 82, w: 170, h: 70, kind: "decode", t: "请求门控", sub: "valid && ready && !error", tip: "只有合法请求才进入执行层" },
+        { x: 474, y: 82, w: 150, h: 70, kind: "reg", t: "work_valid", sub: "任务有效寄存器", tip: "把组合门控变成一拍任务" },
+        { x: 670, y: 82, w: 150, h: 70, kind: "reg", t: "work_done", sub: "执行完成", signal: "work_done" },
+        { x: 258, y: 232, w: 170, h: 62, kind: "out", t: "req_ready", sub: "上游握手", signal: "req_ready" },
+        { x: 474, y: 232, w: 150, h: 62, kind: "out", t: "work_ready", sub: "执行层反压", tip: "ready 为 0 时任务保持" },
+        { x: 670, y: 232, w: 150, h: 62, kind: "decode", t: "完成条件", sub: "work_valid && work_ready" }
+      ],
+      wires: [
+        demoWire("M212,109 H258"), demoLabel(214,101,"valid"),
+        demoWire("M212,175 C232,175 240,150 258,138","err"), demoLabel(218,168,"error"),
+        demoWire("M428,117 H474"), demoLabel(430,109,"pass"),
+        demoWire("M624,117 H670"), demoLabel(626,109,"任务"),
+        demoWire("M343,232 V190 H343 V152","dash"),
+        demoWire("M549,232 V190 H549 V152","dash"),
+        demoWire("M745,232 V152","dash"), demoLabel(751,200,"done")
+      ],
+      note: "work_valid 与 work_done 都是一拍寄存器；req_error 非零时任务门控直接关闭。"
+    },
+    response_stage: {
+      h: 340,
+      bands: [
+        { y: 50, h: 132, t: "响应通路  DATA" },
+        { y: 198, h: 116, t: "保持与反压  CONTROL" }
+      ],
+      nodes: [
+        { x: 92, y: 84, w: 120, h: 54, kind: "out", t: "work_done", sub: "执行完成", signal: "work_done" },
+        { x: 258, y: 76, w: 180, h: 70, kind: "mux", t: "响应保持", sub: "新完成 / 保持当前", tip: "下游未接收时保持 resp_valid" },
+        { x: 484, y: 84, w: 140, h: 54, kind: "out", t: "resp_valid", sub: "响应有效", signal: "resp_valid" },
+        { x: 258, y: 226, w: 170, h: 60, kind: "out", t: "resp_ready", sub: "下游接收", signal: "resp_ready" },
+        { x: 476, y: 226, w: 160, h: 60, kind: "decode", t: "释放条件", sub: "!resp_valid || resp_ready" },
+        { x: 682, y: 226, w: 150, h: 60, kind: "out", t: "保持路径", sub: "ready=0 不清有效位", tip: "反压时保持原值" }
+      ],
+      wires: [
+        demoWire("M212,111 H258"), demoLabel(214,103,"done"),
+        demoWire("M438,111 H484"), demoLabel(440,103,"valid"),
+        demoWire("M343,226 V196 H343 V146","dash"), demoLabel(349,190,"ready"),
+        demoWire("M428,256 H476","dash"), demoLabel(430,248,"release"),
+        demoWire("M636,256 H682","dash"),
+        demoWire("M556,226 V196 H398 V146","dash"), demoLabel(570,214,"hold")
+      ],
+      note: "resp_valid 在 resp_ready 为 0 时保持；只有空闲或完成握手后才接收下一笔。"
+    },
+    status_counter: {
+      h: 320,
+      bands: [
+        { y: 50, h: 132, t: "计数通路  DATA" },
+        { y: 198, h: 100, t: "复位与事件  CONTROL" }
+      ],
+      nodes: [
+        { x: 92, y: 82, w: 130, h: 54, kind: "out", t: "event_valid", sub: "事件有效" },
+        { x: 264, y: 72, w: 190, h: 74, kind: "cnt", t: "32 位计数器", sub: "计数 + 1 · 自然回绕", tip: "event_valid 为 1 时加一" },
+        { x: 500, y: 82, w: 150, h: 54, kind: "out", t: "status_count", sub: "累计事件数", signal: "status_count" },
+        { x: 264, y: 224, w: 170, h: 52, kind: "out", t: "rst_n", sub: "复位清零", tip: "复位优先于计数事件" }
+      ],
+      wires: [
+        demoWire("M222,109 H264"), demoLabel(224,101,"event"),
+        demoWire("M454,109 H500"), demoLabel(456,101,"count"),
+        demoWire("M349,224 V196 H349 V146","dash"), demoLabel(355,216,"clear")
+      ],
+      note: "示例计数器只使用 event_valid；event_error 端口保留，但当前版本不参与计数。"
+    }
+  };
+
+  function demoInternalSvg(name) {
+    const d = DEMO_INTERNALS[name];
+    if (!d) {
+      return `<div class="small dim2" style="padding:18px">该模块没有可展开的内部数据通路；请看模块职责、端口与代码入口。</div>`;
+    }
+    return `<svg class="internal" viewBox="0 0 980 ${d.h}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${esc(name)} 内部数据通路">
+      <defs>
+        <marker id="dar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="mk"/></marker>
+        <marker id="dard" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="mk d"/></marker>
+        <marker id="dare" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="mk e"/></marker>
+      </defs>
+      ${d.bands.map(demoBand).join("")}
+      ${d.nodes.map(demoNode).join("")}
+      ${d.wires.join("")}
+      <text class="dnote" x="24" y="${d.h - 8}">${esc(d.note)}</text>
+    </svg>`;
+  }
+
   function pathButton(number, title, detail, target, signal) {
     return `<button class="path" data-go="${target}"${signal ? ` data-signal="${signal}"` : ""}>
       <span class="n">${number}</span>
@@ -279,11 +432,14 @@
   }
 
   function renderStructure() {
+    const top = state.module === "demo_pipeline";
     $("#main").innerHTML = `
-      <div class="page-h"><div><div class="ttl">模块结构</div><div class="sub">先看职责与接口，再进入具体信号。</div></div><span class="chip">${D.modules.length} 个模块 · 虚构示例</span></div>
+      <div class="page-h"><div><div class="ttl">模块结构</div><div class="sub">先看职责与接口，再进入具体信号。</div></div>
+        <div class="row">${top ? `<span class="chip">${D.modules.length} 个模块 · 虚构示例</span>` : `<button class="btn sm" data-module="demo_pipeline">返回顶层</button>`}</div></div>
       <article class="card overview-map">
-        <h3>模块与连接关系 <span class="section-meta">请求 → 路由 → 响应</span></h3>
-        <div class="diagram">${diagramSvg(state.module)}</div>
+        <h3>${top ? "模块与连接关系" : `${esc(state.module)} 内部数据通路`} <span class="section-meta">${top ? "请求 → 路由 → 响应" : "按源码结构绘制"}</span></h3>
+        <div class="diagram">${top ? diagramSvg(state.module) : demoInternalSvg(state.module)}</div>
+        <div class="legend"><span><i></i>数据 / 请求</span><span><i class="d"></i>控制 / 状态</span><span><i class="e"></i>错误</span>${top ? "" : "<span class=\"dim2\">圆角 FSM · 梯形 MUX · 双线 MEM · 节点可点信号</span>"}</div>
       </article>
       <div class="grid g2" style="margin-top:12px">${moduleCards()}</div>`;
     inspectModule(state.module, false);
@@ -572,7 +728,11 @@
     }
 
     const module = event.target.closest("[data-module]");
-    if (module) return inspectModule(module.dataset.module);
+    if (module) {
+      state.module = module.dataset.module;
+      if (state.tab === "structure") return renderStructure();
+      return inspectModule(module.dataset.module);
+    }
 
     const constant = event.target.closest("[data-const]");
     if (constant) return inspectConstant(constant.dataset.const, constant.dataset.file);

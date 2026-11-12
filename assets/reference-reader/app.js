@@ -205,7 +205,7 @@
 
   function diagramSvg(selected) {
     const node = (name, x, y, width, label, caption) =>
-      `<g class="blk${selected === name ? " sel" : ""}" data-module="${name}" transform="translate(${x} ${y})">
+      `<g class="blk${selected === name ? " sel" : ""}" data-module="${name}" role="button" tabindex="0" transform="translate(${x} ${y})">
         <rect width="${width}" height="66" rx="6"></rect>
         <text x="${width / 2}" y="25" text-anchor="middle">${esc(label)}</text>
         <text class="sub" x="${width / 2}" y="42" text-anchor="middle">${esc(caption)}</text>

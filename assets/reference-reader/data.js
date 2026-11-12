@@ -49,7 +49,7 @@ window.DEMO = {
       parent: "demo_pipeline",
       file: "work_router.sv",
       start: 1,
-      end: 78,
+      end: 79,
       role: "根据请求类型选择快速通道或分块处理，并保存本笔请求的去向。",
       note: "在请求帧第一拍锁存目标，后续载荷跟随同一目标。",
       ports: [
@@ -180,7 +180,7 @@ endmodule`
     },
     "work_router.sv": {
       dir: "rtl",
-      lines: 78,
+      lines: 79,
       code: `module work_router (
     input  wire       clk,
     input  wire       rst_n,
@@ -191,12 +191,13 @@ endmodule`
     input  wire       work_ready,
     output reg        work_done
 );
+    localparam [7:0] ERR_NONE = 8'd0;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             work_valid <= 1'b0;
             work_done  <= 1'b0;
         end else begin
-            work_valid <= req_valid && req_ready && req_error == 0;
+            work_valid <= req_valid && req_ready && req_error == ERR_NONE;
             work_done  <= work_valid && work_ready;
         end
     end
@@ -276,7 +277,7 @@ endmodule`
     work_done: {
       module: "work_router",
       file: "work_router.sv",
-      line: 8,
+      line: 9,
       kind: "output reg",
       width: "1 bit",
       purpose: "表示一笔任务已经在执行层完成，可用于生成响应和状态计数。",

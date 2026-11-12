@@ -26,6 +26,8 @@
     tab: "overview",
     module: "demo_pipeline",
     signal: "req_valid",
+    constant: null,
+    constantFile: null,
     scenario: "request",
     codeFile: "demo_pipeline.sv",
     codeLine: 18,
@@ -34,6 +36,80 @@
 
   const moduleByName = (name) => D.modules.find((item) => item.name === name);
   const signalNames = Object.keys(D.signals);
+
+  /* 常量不是信号：只有声明、取值和引用位置，没有时钟沿。 */
+  const constants = (() => {
+    const found = new Map();
+    const scan = (file, text) => {
+      const add = (name, kind, width, value, line) => {
+        const key = file + ":" + name;
+        if (found.has(key)) return;
+        const [raw, note] = value.split("//");
+        const owner = moduleByName(D.modules.find((m) => m.file === file && line >= m.start && line <= m.end)?.name);
+        found.set(key, {
+          name, file, line, kind, width: width.trim(),
+          value: raw.trim(), note: (note || "").trim(),
+          module: owner ? owner.name : "", uses: []
+        });
+      };
+      const kw = /\b(parameter|localparam)\b/g;
+      let hit;
+      while ((hit = kw.exec(text)) !== null) {
+        const lineStart = text.lastIndexOf("\n", hit.index) + 1;
+        if (text.slice(lineStart, hit.index).includes("//")) continue;
+        let i = kw.lastIndex;
+        let depth = 0;
+        let end = -1;
+        for (; i < text.length; i++) {
+          const ch = text[i];
+          if (ch === "/" && text[i + 1] === "/") {
+            i = text.indexOf("\n", i);
+            if (i < 0) { end = text.length; break; }
+            continue;
+          }
+          if (ch === "(" || ch === "[" || ch === "{") depth++;
+          else if (ch === ")" || ch === "]" || ch === "}") { depth--; if (depth < 0) { end = i; break; } }
+          else if (ch === ";" && depth === 0) { end = i; break; }
+        }
+        if (end < 0) end = text.length;
+        const body = text.slice(kw.lastIndex, end);
+        let start = 0;
+        let inner = 0;
+        for (let j = 0; j <= body.length; j++) {
+          const ch = body[j];
+          if (ch === "(" || ch === "[" || ch === "{") inner++;
+          else if (ch === ")" || ch === "]" || ch === "}") inner--;
+          if ((ch === "," && inner === 0) || j === body.length) {
+            const seg = body.slice(start, j);
+            const decl = seg.match(/([A-Za-z_]\w*)\s*=\s*([\s\S]+)$/);
+            if (decl) {
+              const offset = kw.lastIndex + start + seg.indexOf(decl[1]);
+              const width = (seg.slice(0, seg.indexOf(decl[1])).match(/\[[^\]]*\]/) || [""])[0];
+              add(decl[1], hit[1], width, decl[2], text.slice(0, offset).split("\n").length);
+            }
+            start = j + 1;
+          }
+        }
+        kw.lastIndex = end;
+      }
+    };
+    Object.entries(D.files).forEach(([file, info]) => scan(file, info.code || ""));
+    const needles = [...found.values()].map((item) => ({
+      item, re: new RegExp("\\b" + item.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b")
+    }));
+    Object.entries(D.files).forEach(([file, info]) => {
+      (info.code || "").split("\n").forEach((line, index) => {
+        needles.forEach(({ item, re }) => {
+          if (file === item.file && index + 1 === item.line) return;
+          if (re.test(line)) item.uses.push({ file, line: index + 1, text: line.trim() });
+        });
+      });
+    });
+    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name) || a.file.localeCompare(b.file));
+  })();
+
+  const constFor = (name, file) =>
+    constants.find((item) => item.name === name && item.file === file) || null;
 
   function applyStoredTheme() {
     let theme = "light";
@@ -92,24 +168,33 @@
     return roots.map((root) => render(root, 0)).join("");
   }
 
-  function signalList(query) {
+  function paintSidebarList(query) {
     const q = String(query || "").trim().toLowerCase();
-    return signalNames
+    const signals = signalNames
       .filter((name) => !q || name.toLowerCase().includes(q) || D.signals[name].purpose.toLowerCase().includes(q))
       .slice(0, 120)
-      .map((name) => {
-        const sig = D.signals[name];
-        return `<button class="sigitem${state.signal === name ? " on" : ""}" data-signal="${name}">
-          <span>${esc(name)}</span><span class="d">${esc(sig.kind)}</span>
-        </button>`;
-      })
-      .join("") || '<div class="tiny dim2" style="padding:7px 6px">没有匹配信号</div>';
+      .map((name) => `<button class="sigitem${state.constant ? "" : state.signal === name ? " on" : ""}" data-signal="${name}">
+          <span>${esc(name)}</span><span class="d">${esc(D.signals[name].kind)}</span>
+        </button>`)
+      .join("");
+    const consts = constants
+      .filter((item) => !q || item.name.toLowerCase().includes(q) || item.note.toLowerCase().includes(q))
+      .slice(0, 40)
+      .map((item) => `<button class="sigitem${state.constant === item.name && state.constantFile === item.file ? " on" : ""}" data-const="${esc(item.name)}" data-file="${esc(item.file)}">
+          <span>${esc(item.name)}</span><span class="d">${esc(item.kind === "parameter" ? "param" : "const")}</span>
+        </button>`)
+      .join("");
+    $("#sigList").innerHTML =
+      signals + (consts ? `<div class="tiny dim2" style="padding:8px 6px 2px">常量</div>${consts}` : "") ||
+      '<div class="tiny dim2" style="padding:7px 6px">没有匹配信号</div>';
   }
 
   function buildSidebar() {
     $("#modTree").innerHTML = moduleTree();
-    $("#sigCount").textContent = `${signalNames.length} 个`;
-    $("#sigList").innerHTML = signalList($("#sigSearch").value);
+    $("#sigCount").textContent = constants.length
+      ? `${signalNames.length} 信号 · ${constants.length} 常量`
+      : `${signalNames.length} 个`;
+    paintSidebarList($("#sigSearch").value);
     $("#fileCount").textContent = `${Object.keys(D.files).length} 个`;
     $("#fileTree").innerHTML = Object.entries(D.files).map(([name, file]) =>
       `<button class="item${state.tab === "code" && state.codeFile === name ? " on" : ""}" data-code="${name}">
@@ -253,7 +338,7 @@
   }
 
   function highlightCode(line) {
-    const tokenPattern = /(\/\/[^\n]*)|(\b(?:module|endmodule|input|output|wire|reg|assign|always|posedge|negedge|begin|end|if|else|parameter|localparam)\b)|(\b(?:req_valid|req_ready|req_opcode|req_error|work_valid|work_ready|work_done|resp_valid|resp_ready|status_count)\b)|(\b\d+(?:'[bhd])?[0-9a-fA-F_xXzZ]*\b)/g;
+    const tokenPattern = /(\/\/[^\n]*)|(\b(?:module|endmodule|input|output|wire|reg|assign|always|posedge|negedge|begin|end|if|else|parameter|localparam)\b)|(\b[A-Za-z_]\w*\b)|(\b\d+(?:'[bhd])?[0-9a-fA-F_xXzZ]*\b)/g;
     let result = "";
     let last = 0;
     let match;
@@ -261,7 +346,12 @@
       result += esc(line.slice(last, match.index));
       if (match[1]) result += `<span class="tk-com">${esc(match[0])}</span>`;
       else if (match[2]) result += `<span class="tk-kw">${esc(match[0])}</span>`;
-      else if (match[3]) result += `<span class="tk-id sig" role="button" tabindex="0" data-signal="${match[0]}">${esc(match[0])}</span>`;
+      else if (match[3]) {
+        const word = match[0];
+        if (D.signals[word]) result += `<span class="tk-id sig" role="button" tabindex="0" data-signal="${word}">${esc(word)}</span>`;
+        else if (constFor(word, state.codeFile)) result += `<span class="tk-id const" role="button" tabindex="0" data-const="${word}" data-file="${state.codeFile}">${esc(word)}</span>`;
+        else result += esc(word);
+      }
       else result += `<span class="tk-num">${esc(match[0])}</span>`;
       last = match.index + match[0].length;
     }
@@ -411,10 +501,36 @@
     if (reveal && matchMedia("(max-width:1180px)").matches) openPanel("inspector");
   }
 
+  function inspectConstant(name, file, reveal = true) {
+    const item = constFor(name, file);
+    if (!item) return;
+    state.constant = name;
+    state.constantFile = file;
+    state.signal = null;
+    $("#inspType").textContent = "常量";
+    $("#inspBody").innerHTML = `
+      <div class="i-title mono">${esc(item.name)}</div>
+      <div class="i-sub">${esc(item.file)}:${item.line} · ${esc(item.kind)}</div>
+      <div class="sem-meta">值 <b class="mono">${esc(item.value)}</b></div>
+      <p class="insp-summary">${esc(item.note || `${item.name} 是编译期常量，用来替代散落在代码里的字面量。`)}</p>
+      <div class="i-sec"><h5>更新方式</h5><p>编译期确定，运行中不随时钟或复位改变；改值要重新综合。</p></div>
+      <div class="i-sec"><h5>引用位置 <span class="mini">${item.uses.length} 处</span></h5>
+        <div class="row">${
+          item.uses.slice(0, 12).map((use) =>
+            `<button class="sem-chip mono" data-code="${esc(use.file)}" data-line="${use.line}" title="${esc(use.text)}">${esc(use.file)}:${use.line}</button>`
+          ).join("") || '<span class="tiny dim2">只在声明处出现</span>'
+        }</div></div>
+      <div class="i-actions"><button class="btn sm" data-code="${esc(item.file)}" data-line="${item.line}">定位声明 →</button></div>`;
+    buildSidebar();
+    if (reveal && matchMedia("(max-width:1180px)").matches) openPanel("inspector");
+  }
+
   function inspectSignal(name, reveal = true) {
     const signal = D.signals[name];
     if (!signal) return;
     state.signal = name;
+    state.constant = null;
+    state.constantFile = null;
     $("#inspType").textContent = "信号详情";
     $("#inspBody").innerHTML = `
       <div class="i-title">${esc(name)}</div>
@@ -450,12 +566,16 @@
 
     const path = event.target.closest("[data-go]");
     if (path) {
+      go(path.dataset.go, { scenario: path.dataset.scenario });
       if (path.dataset.signal) inspectSignal(path.dataset.signal);
-      return go(path.dataset.go, { scenario: path.dataset.scenario });
+      return;
     }
 
     const module = event.target.closest("[data-module]");
     if (module) return inspectModule(module.dataset.module);
+
+    const constant = event.target.closest("[data-const]");
+    if (constant) return inspectConstant(constant.dataset.const, constant.dataset.file);
 
     const signal = event.target.closest("[data-signal]");
     if (signal) return inspectSignal(signal.dataset.signal);
@@ -483,7 +603,7 @@
   });
 
   document.addEventListener("keydown", (event) => {
-    const control = event.target.closest("[data-signal][role='button'], [data-module][role='button']");
+    const control = event.target.closest("[data-signal][role='button'], [data-const][role='button'], [data-module][role='button']");
     if (control && (event.key === "Enter" || event.key === " ")) {
       event.preventDefault();
       control.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -492,7 +612,7 @@
   });
 
   $("#sigSearch").addEventListener("input", (event) => {
-    $("#sigList").innerHTML = signalList(event.target.value);
+    paintSidebarList(event.target.value);
   });
   $("#themeBtn").addEventListener("click", toggleTheme);
   $("#navToggle").addEventListener("click", () => openPanel("nav"));

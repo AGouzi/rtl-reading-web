@@ -260,6 +260,7 @@ table.t td.mono,table.t th.mono{font-family:var(--mono);font-size:11.5px}
 .tk-id{cursor:pointer}
 .tk-id:hover{text-decoration:underline;color:var(--tx)}
 .tk-id.sig{color:var(--sig)}
+.tk-id.const{color:var(--num);border-bottom:1px dotted var(--dim2)}
 .tk-id.hit{background:var(--hit-bg);color:var(--hit-tx);border-radius:2px}
 .tk-id.selh{background:var(--selh-bg);color:var(--selh-tx);border-radius:2px}
 .code-explain{border:1px solid var(--line);border-left:3px solid var(--amb);background:var(--note-amb);padding:10px 12px;border-radius:0 6px 6px 0;margin-bottom:10px}

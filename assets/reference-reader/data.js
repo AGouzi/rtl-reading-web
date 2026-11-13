@@ -60,7 +60,7 @@ window.DEMO = {
       parent: "demo_pipeline",
       file: "ingress_stage.sv",
       start: 1,
-      end: 21,
+      end: 47,
       role: "接收输入拍，检查字段边界，生成一条内部请求描述符。",
       note: "格式错误只产生一拍的错误事件，不进入路由。",
       ports: [
@@ -359,7 +359,7 @@ endmodule`
     },
     "ingress_stage.sv": {
       dir: "rtl",
-      lines: 21,
+      lines: 47,
       code: `module ingress_stage (
     input  wire       clk,
     input  wire       rst_n,
@@ -379,6 +379,32 @@ endmodule`
             req_valid_i <= req_valid;
             req_error   <= (req_valid && req_opcode == 8'd0) ? 8'h01 : 8'd0;
         end
+    end
+
+    localparam integer SLOT_COUNT = 2;
+    reg [SLOT_COUNT-1:0] slot_busy;
+    reg packet_magic;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            slot_busy <= {SLOT_COUNT{1'b0}};
+            packet_magic <= 1'b0;
+        end else begin
+            slot_busy <= {SLOT_COUNT{req_valid}};
+            packet_magic <= (req_opcode == 8'hA5);
+        end
+    end
+
+    localparam integer WORDS_PER_SLOT = 4;
+    (* ram_style = "block" *) reg [63:0] packet_mem [0:SLOT_COUNT*WORDS_PER_SLOT-1];
+    reg [63:0] packet_q;
+
+    // 参考页用它验证存储声明、位宽和深度解析，不声明 BRAM 映射。
+
+    always @(posedge clk) begin
+        if (req_valid)
+            packet_mem[req_opcode[2:0]] <= {8{req_opcode}};
+        packet_q <= packet_mem[req_opcode[2:0]];
     end
 endmodule`
     },
@@ -543,6 +569,41 @@ endmodule`
       rules: ["0 表示合法。", "0x01 表示示例非法操作码。"],
       related: ["req_opcode", "req_valid"],
       evidence: [{ file: "ingress_stage.sv", start: 18, end: 18, note: "错误码组合逻辑" }]
+    },
+    packet_magic: {
+      module: "ingress_stage",
+      instance: "u_ingress",
+      file: "ingress_stage.sv",
+      line: 24,
+      kind: "internal reg",
+      width: "1 bit",
+      group: "status",
+      purpose: "标记操作码命中示例魔数 0xA5 的请求，用于验证无范围声明必须解析为 1 bit。",
+      timing: "在 clk 上升沿按 req_opcode 更新；复位后为 0。",
+      rules: ["声明没有位宽范围，宽度只能是 1 bit。", "该位只做标记，不参与 ready 反压。"],
+      related: ["req_opcode", "slot_busy"],
+      evidence: [
+        { file: "ingress_stage.sv", start: 24, end: 24, note: "标量声明，宽度 1 bit" },
+        { file: "ingress_stage.sv", start: 29, end: 29, note: "复位清零" },
+        { file: "ingress_stage.sv", start: 32, end: 32, note: "按操作码更新标记" }
+      ]
+    },
+    slot_busy: {
+      module: "ingress_stage",
+      instance: "u_ingress",
+      file: "ingress_stage.sv",
+      line: 23,
+      kind: "internal reg",
+      width: "2 bit",
+      group: "status",
+      purpose: "参数化槽位占用向量，用来验证声明宽度可以由 localparam 表达式求出。",
+      timing: "在 clk 上升沿整体更新；复位时清零。",
+      rules: ["SLOT_COUNT 为 2，因此向量宽度为 2 bit。", "扩展槽位时只改参数，不应手写宽度。"],
+      related: ["packet_magic", "req_valid"],
+      evidence: [
+        { file: "ingress_stage.sv", start: 22, end: 23, note: "参数化范围声明" },
+        { file: "ingress_stage.sv", start: 31, end: 31, note: "按槽位向量更新" }
+      ]
     },
     work_valid: {
       module: "work_router",
@@ -739,7 +800,7 @@ endmodule`
     transitions: [
       { from: "IDLE", to: "ACTIVE", condition: "req_valid && req_ready && req_error == 0", short: "合法请求", kind: "normal", code: 27 },
       { from: "ACTIVE", to: "DONE", condition: "work_ready", short: "work_ready", kind: "normal", code: 35 },
-      { from: "DONE", to: "IDLE", condition: "1", short: "1", kind: "normal", code: 40 }
+      { from: "DONE", to: "IDLE", condition: "1", short: "1", kind: "normal", code: 40, routeSide: "bottom" }
     ]
   },
 

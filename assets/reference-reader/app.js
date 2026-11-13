@@ -24,6 +24,10 @@
 
   const rootModule = D.modules.find((item) => !item.parent) || D.modules[0];
   const moduleByName = (name) => D.modules.find((item) => item.name === name);
+  const moduleAt = (file, line) =>
+    D.modules.find(
+      (item) => item.file === file && Number(line) >= item.start && Number(line) <= item.end
+    ) || null;
   const childrenOf = (name) => D.modules.filter((item) => item.parent === name);
   const signalNames = Object.keys(D.signals);
   const internalEdges = D.modules.flatMap((module) =>
@@ -153,6 +157,7 @@
     scenario: "request",
     codeFile: "demo_pipeline.sv",
     codeLine: 17,
+    codeJump: 17,
     bench: null,
     inspect: { type: "module", id: rootModule.name }
   };
@@ -624,8 +629,13 @@
     return units * (fontSize / 10);
   }
 
-  function labelRectAt(x, y, width) {
-    return { x: x - width / 2, y: y - 10, w: width, h: 13 };
+  function labelRectAt(x, y, width, height = 13, centered = false) {
+    return {
+      x: x - width / 2,
+      y: centered ? y - height / 2 : y - 10,
+      w: width,
+      h: height
+    };
   }
 
   function overlapArea(a, b) {
@@ -672,7 +682,7 @@
 
   function labelCandidates(points, width, height, bounds) {
     const candidates = [];
-    const push = (x, y) => candidates.push({ x, y });
+    const push = (x, y, rank = 0) => candidates.push({ x, y, rank });
     for (let index = 1; index < points.length; index += 1) {
       const before = points[index - 1];
       const after = points[index];
@@ -681,15 +691,16 @@
         if (length >= 22) {
           for (const ratio of [0.5, 0.32, 0.68, 0.2, 0.8]) {
             const x = before.x + (after.x - before.x) * ratio;
-            push(x, before.y - 10);
-            push(x, before.y + 17);
-            push(x, before.y - 20);
-            push(x, before.y + 27);
+            const ratioRank = ratio === 0.5 ? 0 : Math.abs(ratio - 0.5) < 0.25 ? 1 : 2;
+            push(x, before.y - 10, ratioRank);
+            push(x, before.y + 17, ratioRank);
+            push(x, before.y - 20, ratioRank + 1);
+            push(x, before.y + 27, ratioRank + 1);
             for (let level = 0; level < 4; level += 1) {
-              push(x, Math.max(12, bounds.top - 24 - level * 18));
+              push(x, Math.max(12, bounds.top - 24 - level * 18), 10 + level);
             }
             for (let level = 0; level < 4; level += 1) {
-              push(x, bounds.bottom + 24 + level * 18);
+              push(x, bounds.bottom + 24 + level * 18, 10 + level);
             }
           }
         }
@@ -698,36 +709,36 @@
         if (length >= 22) {
           for (const ratio of [0.5, 0.32, 0.68, 0.2, 0.8]) {
             const y = before.y + (after.y - before.y) * ratio;
-            push(before.x + width / 2 + 8, y);
-            push(before.x - width / 2 - 8, y);
+            const ratioRank = ratio === 0.5 ? 0 : Math.abs(ratio - 0.5) < 0.25 ? 1 : 2;
+            push(before.x + width / 2 + 8, y, 20 + ratioRank);
+            push(before.x - width / 2 - 8, y, 20 + ratioRank);
             for (let level = 0; level < 4; level += 1) {
-              push(before.x, Math.max(12, bounds.top - 24 - level * 18));
+              push(before.x, Math.max(12, bounds.top - 24 - level * 18), 30 + level);
             }
             for (let level = 0; level < 4; level += 1) {
-              push(before.x, bounds.bottom + 24 + level * 18);
+              push(before.x, bounds.bottom + 24 + level * 18, 30 + level);
             }
           }
         }
       }
     }
     const midX = (bounds.left + bounds.right) / 2;
-    push(midX, bounds.top - 24);
-    push(midX, bounds.bottom + 24);
-    push(bounds.left - width / 2 - 20, (bounds.top + bounds.bottom) / 2);
-    push(bounds.right + width / 2 + 20, (bounds.top + bounds.bottom) / 2);
+    push(midX, bounds.top - 24, 40);
+    push(midX, bounds.bottom + 24, 40);
+    push(bounds.left - width / 2 - 20, (bounds.top + bounds.bottom) / 2, 40);
+    push(bounds.right + width / 2 + 20, (bounds.top + bounds.bottom) / 2, 40);
     return candidates;
   }
 
-  function placeEdgeLabel(points, width, nodeRects, placedLabels, bounds) {
-    const height = 13;
+  function placeEdgeLabel(points, width, nodeRects, placedLabels, bounds, height = 13, centered = false) {
     const candidates = labelCandidates(points, width, height, bounds);
     let best = null;
     let bestScore = Infinity;
     for (const candidate of candidates) {
-      const box = labelRectAt(candidate.x, candidate.y, width);
+      const box = labelRectAt(candidate.x, candidate.y, width, height, centered);
       const nodeOverlap = nodeRects.reduce((sum, node) => sum + overlapArea(box, node), 0);
       const labelOverlap = placedLabels.reduce((sum, label) => sum + overlapArea(box, label), 0);
-      const score = nodeOverlap * 20 + labelOverlap * 8;
+      const score = nodeOverlap * 20 + labelOverlap * 8 + (candidate.rank || 0);
       if (score < bestScore) {
         bestScore = score;
         best = { ...candidate, box };
@@ -946,15 +957,46 @@
     ).join("");
   }
 
+  function uniqueEvidence(items) {
+    const byPosition = new Map();
+    for (const item of items || []) {
+      if (!item || !item.file) continue;
+      const line = Number(item.start || item.line || 0);
+      if (!line) continue;
+      const key = item.file + ":" + line;
+      const previous = byPosition.get(key);
+      if (!previous) {
+        byPosition.set(key, {
+          file: item.file,
+          start: line,
+          end: Number(item.end || line),
+          note: item.note || item.text || ""
+        });
+        continue;
+      }
+      if (!previous.note && (item.note || item.text)) previous.note = item.note || item.text;
+      previous.end = Math.max(previous.end, Number(item.end || line));
+    }
+    return [...byPosition.values()].sort(
+      (left, right) =>
+        Object.keys(D.files).indexOf(left.file) - Object.keys(D.files).indexOf(right.file) ||
+        left.start - right.start
+    );
+  }
+
   function evidenceHtml(items) {
-    if (!items || !items.length) return "";
-    return items.map((item) => {
+    const evidence = uniqueEvidence(items);
+    if (!evidence.length) return "";
+    return evidence.map((item) => {
       const range = item.end && item.end !== item.start ? `${item.start}–${item.end}` : `${item.start}`;
-      return `<button type="button" class="sem-ev" data-code="${esc(item.file)}" data-line="${item.start}">
-        <span class="sem-ev-l">L${range}</span>
-        <span class="mono">${esc(item.file)}</span>
-        <span class="dim2">${esc(item.note || "")}</span>
-      </button>`;
+      return `<div class="sem-ev-row">
+        <button type="button" class="sem-ev" data-code="${esc(item.file)}" data-line="${item.start}">
+          <span class="sem-ev-l">L${range}</span>
+          <span class="mono">${esc(item.file)}</span>
+          <span class="dim2">${esc(item.note || "")}</span>
+        </button>
+        <button type="button" class="btn sm sem-copy" data-copy-file="${esc(item.file)}" data-copy-line="${item.start}" title="复制文件和行号" aria-label="复制 ${esc(item.file)}:${item.start}">复制</button>
+      </div>`;
     }).join("");
   }
 
@@ -1220,54 +1262,240 @@
       </details>`;
   }
 
+  const FSM_NORMAL = { l: [-1, 0], r: [1, 0], t: [0, -1], b: [0, 1] };
+
+  function fsmAnchor(node, side, offset) {
+    const shift = Number(offset) || 0;
+    if (side === "l") return { x: node.x, y: node.y + node.h / 2 + shift };
+    if (side === "r") return { x: node.x + node.w, y: node.y + node.h / 2 + shift };
+    if (side === "t") return { x: node.x + node.w / 2 + shift, y: node.y };
+    return { x: node.x + node.w / 2 + shift, y: node.y + node.h };
+  }
+
+  function fsmShift(point, side, distance) {
+    const normal = FSM_NORMAL[side] || FSM_NORMAL.r;
+    return { x: point.x + normal[0] * distance, y: point.y + normal[1] * distance };
+  }
+
+  function fsmSides(from, to) {
+    const dx = to.x + to.w / 2 - (from.x + from.w / 2);
+    const dy = to.y + to.h / 2 - (from.y + from.h / 2);
+    if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+    return dy >= 0 ? ["b", "t"] : ["t", "b"];
+  }
+
+  function fsmRoute(edge, from, to, obstacles, bounds) {
+    const fromSide = edge.fromSide || edge.sides[0];
+    const toSide = edge.toSide || edge.sides[1];
+    const start = fsmAnchor(from, fromSide, edge.fromOffset);
+    const end = fsmAnchor(to, toSide, edge.toOffset);
+    const stub = 16;
+    const startStub = fsmShift(start, fromSide, stub);
+    const endStub = fsmShift(end, toSide, stub);
+    const fromHorizontal = fromSide === "l" || fromSide === "r";
+    const toHorizontal = toSide === "l" || toSide === "r";
+    const candidates = [];
+    const add = (points, lane) => candidates.push({ points: cleanRoute(points), lane: lane || "" });
+    if (start.x === end.x || start.y === end.y) add([start, end], "direct");
+    add([start, startStub, { x: endStub.x, y: startStub.y }, endStub, end], "elbow-y");
+    add([start, startStub, { x: startStub.x, y: endStub.y }, endStub, end], "elbow-x");
+    if (fromHorizontal && toHorizontal) {
+      if (Math.abs(startStub.y - endStub.y) > 0.5) {
+        const middleX = (startStub.x + endStub.x) / 2;
+        add([start, startStub, { x: middleX, y: startStub.y }, { x: middleX, y: endStub.y }, endStub, end], "middle");
+      }
+    } else if (!fromHorizontal && !toHorizontal) {
+      if (Math.abs(startStub.x - endStub.x) > 0.5) {
+        const middleY = (startStub.y + endStub.y) / 2;
+        add([start, startStub, { x: startStub.x, y: middleY }, { x: endStub.x, y: middleY }, endStub, end], "middle");
+      }
+    } else if (fromHorizontal) {
+      add([start, startStub, { x: endStub.x, y: startStub.y }, endStub, end], "elbow-y");
+    } else {
+      add([start, startStub, { x: startStub.x, y: endStub.y }, endStub, end], "elbow-x");
+    }
+    const outerTop = bounds.top - 34;
+    const outerBottom = bounds.bottom + 34;
+    const outerLeft = bounds.left - 34;
+    const outerRight = bounds.right + 34;
+    add([start, startStub, { x: startStub.x, y: outerTop }, { x: endStub.x, y: outerTop }, endStub, end], "top");
+    add([start, startStub, { x: startStub.x, y: outerBottom }, { x: endStub.x, y: outerBottom }, endStub, end], "bottom");
+    add([start, startStub, { x: outerLeft, y: startStub.y }, { x: outerLeft, y: endStub.y }, endStub, end], "left");
+    add([start, startStub, { x: outerRight, y: startStub.y }, { x: outerRight, y: endStub.y }, endStub, end], "right");
+    const clear = candidates.filter((candidate) => routeClear(candidate.points, obstacles));
+    const pool = clear.length ? clear : candidates;
+    const preferred = edge.transition.routeSide;
+    pool.sort((left, right) => {
+      const leftPreferred = preferred && left.lane === preferred ? 1 : 0;
+      const rightPreferred = preferred && right.lane === preferred ? 1 : 0;
+      return rightPreferred - leftPreferred
+        || routeLength(left.points) - routeLength(right.points)
+        || left.points.length - right.points.length;
+    });
+    return pool[0].points;
+  }
+
+  function fsmSelfRouteSide(node, side) {
+    const gap = 42;
+    if (side === "r") {
+      const start = { x: node.x + node.w, y: node.y + node.h * 0.32 };
+      const end = { x: node.x + node.w, y: node.y + node.h * 0.68 };
+      return [start, { x: start.x + gap, y: start.y }, { x: end.x + gap, y: end.y }, end];
+    }
+    if (side === "b") {
+      const start = { x: node.x + node.w * 0.32, y: node.y + node.h };
+      const end = { x: node.x + node.w * 0.68, y: node.y + node.h };
+      return [start, { x: start.x, y: start.y + gap }, { x: end.x, y: end.y + gap }, end];
+    }
+    if (side === "l") {
+      const start = { x: node.x, y: node.y + node.h * 0.32 };
+      const end = { x: node.x, y: node.y + node.h * 0.68 };
+      return [start, { x: start.x - gap, y: start.y }, { x: end.x - gap, y: end.y }, end];
+    }
+    const start = { x: node.x + node.w * 0.32, y: node.y };
+    const end = { x: node.x + node.w * 0.68, y: node.y };
+    return [start, { x: start.x, y: start.y - gap }, { x: end.x, y: end.y - gap }, end];
+  }
+
+  function fsmSelfRoute(node, edge, obstacles) {
+    const preferred = edge.selfSide || "t";
+    const sides = [preferred, "t", "r", "b", "l"].filter(
+      (side, index, all) => all.indexOf(side) === index
+    );
+    for (const side of sides) {
+      const points = fsmSelfRouteSide(node, side);
+      if (!obstacles || routeClear(points, obstacles)) return points;
+    }
+    return fsmSelfRouteSide(node, preferred);
+  }
+
   function fsmSvg() {
     const fsm = D.fsm;
     if (!fsm) return "";
-    const width = 760;
-    const height = 210;
-    const stateWidth = 130;
+    const stateWidth = 136;
     const stateHeight = 48;
-    const byId = new Map(fsm.states.map((item) => [item.id, item]));
-    const transitions = fsm.transitions.map((transition) => {
+    const nodes = fsm.states.map((item) => ({
+      ...item,
+      w: Number(item.w) || stateWidth,
+      h: Number(item.h) || stateHeight
+    }));
+    const byId = new Map(nodes.map((item) => [item.id, item]));
+    const edges = fsm.transitions.map((transition, index) => {
       const from = byId.get(transition.from);
       const to = byId.get(transition.to);
-      if (!from || !to) return "";
-      let path;
-      let labelX;
-      let labelY;
-      if (to.x > from.x) {
-        const fromX = from.x + stateWidth;
-        const y = from.y + stateHeight / 2;
-        path = `M ${fromX} ${y} H ${to.x}`;
-        labelX = (fromX + to.x) / 2;
-        labelY = y - 9;
-      } else if (to.x < from.x) {
-        const top = Math.min(from.y, to.y) - 30;
-        const fromX = from.x + stateWidth / 2;
-        const toX = to.x + stateWidth / 2;
-        path = `M ${fromX} ${from.y} V ${top} H ${toX} V ${to.y}`;
-        labelX = (fromX + toX) / 2;
-        labelY = top - 7;
-      } else {
-        const x = from.x + stateWidth / 2;
-        path = `M ${x} ${from.y + stateHeight} V ${to.y}`;
-        labelX = x + 8;
-        labelY = (from.y + stateHeight + to.y) / 2;
+      return {
+        id: "fsm-edge-" + index,
+        transition,
+        from,
+        to,
+        sides: from && to ? fsmSides(from, to) : ["r", "l"],
+        type: transition.kind === "err" ? "err" : transition.kind === "warn" ? "warn" : "data",
+        label: transition.short || transition.condition || ""
+      };
+    }).filter((edge) => edge.from && edge.to);
+
+    const groups = new Map();
+    for (const edge of edges) {
+      for (const role of ["from", "to"]) {
+        const node = edge[role];
+        const side = edge.sides[role === "from" ? 0 : 1];
+        const key = node.id + "|" + side;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({ edge, role });
       }
-      const cls = transition.kind === "err" ? "tr err" : transition.kind === "warn" ? "tr warn" : "tr";
-      return `<g class="fsm-edge"><path class="${cls}" d="${path}" marker-end="url(#fsm-arrow)"></path><text class="trlabel" x="${labelX}" y="${labelY}" text-anchor="middle">${esc(transition.short || transition.condition)}</text></g>`;
+    }
+    for (const entries of groups.values()) {
+      entries.forEach((entry, index) => {
+        const offset = entries.length > 1 ? (index - (entries.length - 1) / 2) * 10 : 0;
+        if (entry.role === "from") entry.edge.fromOffset = offset;
+        else entry.edge.toOffset = offset;
+      });
+    }
+    for (const edge of edges) {
+      const fromEntries = groups.get(edge.from.id + "|" + edge.sides[0]);
+      const toEntries = groups.get(edge.to.id + "|" + edge.sides[1]);
+      if (!fromEntries || !toEntries) continue;
+      if (fromEntries.length === 1 && toEntries.length > 1) {
+        edge.fromOffset = edge.toOffset;
+      } else if (toEntries.length === 1 && fromEntries.length > 1) {
+        edge.toOffset = edge.fromOffset;
+      }
+    }
+
+    const nodeRects = nodes.map((node) => ({
+      x: node.x,
+      y: node.y,
+      w: node.w,
+      h: node.h
+    }));
+    const bounds = nodeRects.reduce(
+      (result, rect) => ({
+        left: Math.min(result.left, rect.x),
+        right: Math.max(result.right, rect.x + rect.w),
+        top: Math.min(result.top, rect.y),
+        bottom: Math.max(result.bottom, rect.y + rect.h)
+      }),
+      { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity }
+    );
+    const placedLabels = [];
+    const routes = [];
+    const paths = edges.map((edge) => {
+      const obstacles = nodes
+        .filter((node) => node.id !== edge.from.id && node.id !== edge.to.id)
+        .map((node) => inflateRect({ x: node.x, y: node.y, w: node.w, h: node.h }, 4));
+      const points = edge.from === edge.to
+        ? fsmSelfRoute(edge.from, edge, obstacles)
+        : fsmRoute(edge, edge.from, edge.to, obstacles, bounds);
+      const width = Math.max(54, textWidth(edge.label, 11.5) + 16);
+      const labelPoint = placeEdgeLabel(points, width, nodeRects, placedLabels, bounds, 22, true);
+      placedLabels.push(labelPoint.box);
+      const leader = edgeLeader(points, labelPoint, nodeRects);
+      routes.push({ edge, points, labelPoint, width, leader });
+      return `<path class="tr ${edge.type}" d="${routePath(points)}" marker-end="url(#fsm-arrow-${edge.type})"/>`;
     }).join("");
-    const states = fsm.states.map((item) =>
+    const labels = routes.map(({ edge, points, labelPoint, width, leader }) => {
+      const x = labelPoint.x - width / 2;
+      const y = labelPoint.y - 11;
+      return `${leader ? `<path class="tr-leader ${edge.type}" d="${leader}"/>` : ""}
+        <g class="tr-label ${edge.type}">
+          <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${width.toFixed(1)}" height="22" rx="4"/>
+          <text x="${labelPoint.x.toFixed(1)}" y="${labelPoint.y.toFixed(1)}" text-anchor="middle" dominant-baseline="middle">${esc(edge.label)}</text>
+        </g>`;
+    }).join("");
+    const states = nodes.map((item) =>
       `<g class="st${state.state === item.id ? " sel" : ""}" data-state="${item.id}" role="button" tabindex="0" transform="translate(${item.x} ${item.y})">
-        <rect width="${stateWidth}" height="${stateHeight}" rx="5"></rect>
-        <text x="${stateWidth / 2}" y="${stateHeight / 2 + 4}">${esc(item.label)}</text>
+        <rect width="${item.w}" height="${item.h}" rx="7"></rect>
+        <text x="${item.w / 2}" y="${item.h / 2}" text-anchor="middle" dominant-baseline="middle">${esc(item.label)}</text>
       </g>`
     ).join("");
-    return `<svg viewBox="0 0 ${width} ${height}" role="group" aria-label="route_state 状态机">
-      <defs><marker id="fsm-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="marker" d="M0,0 L8,4 L0,8 z"></path></marker></defs>
-      ${transitions}
+    const labelsBounds = placedLabels.reduce(
+      (result, box) => ({
+        left: Math.min(result.left, box.x),
+        right: Math.max(result.right, box.x + box.w),
+        top: Math.min(result.top, box.y),
+        bottom: Math.max(result.bottom, box.y + box.h)
+      }),
+      bounds
+    );
+    const padding = 24;
+    const minX = Math.min(0, labelsBounds.left - padding);
+    const minY = Math.min(0, labelsBounds.top - padding);
+    const noteX = minX + padding;
+    const noteY = Math.max(labelsBounds.bottom, bounds.bottom) + 30;
+    const noteWidth = textWidth(fsm.note || "", 11.5);
+    const width = Math.max(labelsBounds.right, bounds.right, noteX + noteWidth) - minX + padding;
+    const height = noteY + 18 - minY;
+    const markers = ["data", "warn", "err"].map((type) =>
+      `<marker id="fsm-arrow-${type}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+        <path class="marker ${type}" d="M0,0 L7,4 L0,8 z"></path>
+      </marker>`
+    ).join("");
+    return `<svg viewBox="${minX} ${minY} ${width} ${height}" role="group" aria-label="${esc(fsm.name)} 状态机">
+      <defs>${markers}</defs>
+      ${paths}
+      ${labels}
       ${states}
-      <text class="dnote" x="20" y="${height - 18}">${esc(fsm.note)}</text>
+      <text class="dnote" x="${noteX}" y="${noteY}">${esc(fsm.note)}</text>
     </svg>`;
   }
 
@@ -1302,7 +1530,7 @@
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  function highlightCode(line) {
+  function highlightCode(line, declaredSymbols) {
     const tokenPattern = new RegExp(
       "(\\/\\/[^\\n]*)|(\\b(?:module|endmodule|input|output|wire|reg|assign|always|posedge|negedge|begin|end|if|else|case|endcase|default|parameter|localparam)\\b)|(\\b[A-Za-z_]\\w*\\b)|(\\b\\d+(?:'[bhd])?[0-9a-fA-F_xXzZ]*\\b)",
       "g"
@@ -1317,9 +1545,13 @@
       else if (match[3]) {
         const word = match[0];
         if (D.signals[word]) {
-          result += `<span class="tk-id sig" role="button" tabindex="0" data-signal="${esc(word)}">${esc(word)}</span>`;
+          const selected = state.signal === word ? " selh" : "";
+          result += `<span class="tk-id sig${selected}" role="button" tabindex="0" data-signal="${esc(word)}" data-file="${esc(state.codeFile)}">${esc(word)}</span>`;
         } else if (constFor(word, state.codeFile)) {
           result += `<span class="tk-id const" role="button" tabindex="0" data-const="${esc(word)}" data-file="${esc(state.codeFile)}">${esc(word)}</span>`;
+        } else if (declaredSymbols && declaredSymbols.has(word)) {
+          const selected = state.signal === word ? " selh" : "";
+          result += `<span class="tk-id sig auto${selected}" role="button" tabindex="0" data-signal="${esc(word)}" data-file="${esc(state.codeFile)}" title="由源码声明自动识别">${esc(word)}</span>`;
         } else {
           result += esc(word);
         }
@@ -1330,9 +1562,145 @@
     return result + esc(line.slice(last));
   }
 
+  const signalPositionCache = new Map();
+  function collectSignalPositions(name, file) {
+    if (!name) return [];
+    const cacheKey = name + "|" + (file || "*");
+    if (signalPositionCache.has(cacheKey)) return signalPositionCache.get(cacheKey);
+    const positions = window.SigSem
+      ? window.SigSem.positions(name, file ? { file } : undefined)
+      : Object.entries(D.files)
+        .filter(([candidate]) => !file || candidate === file)
+        .flatMap(([file, info]) =>
+          String(info.code || "")
+            .split("\n")
+            .map((line, index) => ({ file, line: index + 1, text: line }))
+        )
+        .filter((item) => new RegExp("\\b" + escapeRegExp(name) + "\\b").test(item.text))
+        .map(({ file, line }) => ({ file, line }));
+    signalPositionCache.set(cacheKey, positions);
+    return positions;
+  }
+
+  function signalPositions(name, file = state.codeFile) {
+    return collectSignalPositions(name, file);
+  }
+
+  function allSignalPositions(name) {
+    return collectSignalPositions(name, "");
+  }
+
+  function signalNavHtml() {
+    const name = state.signal;
+    if (!name) return '<span class="tiny dim2 code-nav-tip">点击代码中的信号，可逐处跳转</span>';
+    const positions = signalPositions(name, state.codeFile);
+    const index = positions.findIndex(
+      (item) => item.file === state.codeFile && item.line === Number(state.codeLine)
+    );
+    const count = positions.length
+      ? (index >= 0 ? index + 1 : "–") + "/" + positions.length
+      : "0/0";
+    const location = index >= 0
+      ? positions[index].file + ":" + positions[index].line
+      : positions.length ? "本文件 " + positions.length + " 处" : "本文件无匹配";
+    return `<div class="sig-nav" aria-label="信号位置导航">
+      <span class="sig-nav-name mono" title="${esc(name)}">${esc(name)}</span>
+      <span class="sig-nav-scope">本文件</span>
+      <button class="btn sm sig-nav-btn" id="sigPrevBtn" title="在本文件跳到上一处出现位置"${positions.length > 1 ? "" : " disabled"}>上一处</button>
+      <span class="sig-nav-count mono" id="sigNavCount" aria-live="polite">${count}</span>
+      <button class="btn sm sig-nav-btn" id="sigNextBtn" title="在本文件跳到下一处出现位置"${positions.length > 1 ? "" : " disabled"}>下一处</button>
+      <button class="btn sm sig-nav-btn" id="sigCopyBtn" title="复制当前位置"${state.codeFile && state.codeLine ? "" : " disabled"}>复制位置</button>
+      <span class="sig-nav-at" id="sigNavAt" aria-live="polite">${esc(location)}</span>
+    </div>`;
+  }
+
+  function centerCodeLine(line) {
+    requestAnimationFrame(() => {
+      const scroller = $("#codeBody");
+      const target = scroller && scroller.querySelector(`.cl[data-line="${line}"]`);
+      if (!scroller || !target) return;
+      const scrollerRect = scroller.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const delta = targetRect.top - scrollerRect.top
+        - (scroller.clientHeight - targetRect.height) / 2;
+      scroller.scrollTop = Math.max(0, scroller.scrollTop + delta);
+    });
+  }
+
+  function copyText(text) {
+    const value = String(text || "");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).then(
+        () => setHint("已复制 · " + (value.split("\n")[0] || "")),
+        () => fallbackCopy(value)
+      );
+      return;
+    }
+    fallbackCopy(value);
+  }
+
+  function fallbackCopy(value) {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch (_) {}
+    area.remove();
+    setHint(copied ? "已复制 · " + (value.split("\n")[0] || "") : "复制失败，请手动选择代码行");
+  }
+
+  function copyCodePosition(file, line) {
+    const info = D.files[file];
+    if (!info) return;
+    const source = String(info.code || "").split("\n")[Math.max(0, Number(line) - 1)] || "";
+    copyText(file + ":" + line + (source ? "\n" + source : ""));
+  }
+
+  function stepSignalPosition(direction) {
+    const file = state.codeFile;
+    const positions = signalPositions(state.signal, file);
+    if (!positions.length) return;
+    const current = positions.findIndex(
+      (item) => item.file === file && item.line === Number(state.codeLine)
+    );
+    let next;
+    if (current >= 0) {
+      next = (current + direction + positions.length) % positions.length;
+    } else {
+      if (direction > 0) {
+        next = positions.findIndex((item) => item.line > Number(state.codeLine));
+        if (next < 0) next = 0;
+      } else {
+        for (let index = positions.length - 1; index >= 0; index -= 1) {
+          if (positions[index].line < Number(state.codeLine)) {
+            next = index;
+            break;
+          }
+        }
+        if (next == null) next = positions.length - 1;
+      }
+    }
+    const target = positions[next];
+    if (!target) return;
+    state.codeLine = target.line;
+    state.codeJump = target.line;
+    renderCode();
+    buildSidebar();
+    setCrumb("代码导航 · " + file + ":" + target.line);
+  }
+
   function renderCode() {
     const file = D.files[state.codeFile] || D.files[Object.keys(D.files)[0]];
     const lines = file.code.split("\n");
+    const declaredSymbols = window.SigSem
+      ? window.SigSem.symbols(state.codeFile)
+      : new Set();
     $("#main").innerHTML = `
       <div class="page-h"><div><div class="ttl">代码导航</div><div class="sub">从信号、模块或阅读入口直接定位到源码行。</div></div><span class="chip">${esc(state.codeFile)}</span></div>
       <div class="code-bar">
@@ -1341,12 +1709,14 @@
         <button type="button" class="btn sm" data-code="demo_pipeline.sv" data-line="17">输入检查实例</button>
         <button type="button" class="btn sm" data-code="work_router.sv" data-line="27">状态转移</button>
         <button type="button" class="btn sm" data-code="response_stage.sv" data-line="11">响应保持</button>
+        ${signalNavHtml()}
       </div>
       <div class="code-wrap">
-        <div class="code-scroll">
+        <div class="code-scroll" id="codeBody">
           ${lines.map((line, index) => {
             const number = index + 1;
-            return `<div class="cl${number === state.codeLine ? " hl" : ""}" data-line="${number}"><span class="ln">${number}</span><span class="src">${highlightCode(line) || " "}</span></div>`;
+            const selectedLine = state.signal && new RegExp("\\b" + escapeRegExp(state.signal) + "\\b").test(line);
+            return `<div class="cl${selectedLine ? " sigline" : ""}${number === state.codeLine ? " hl" : ""}" data-line="${number}" id="L${number}"><span class="ln">${number}</span><span class="src">${highlightCode(line, declaredSymbols) || " "}</span></div>`;
           }).join("")}
         </div>
       </div>
@@ -1354,18 +1724,23 @@
         <h4>当前入口</h4>
         <p>${esc(file.code.split("\n")[Math.max(0, state.codeLine - 1)].trim() || "空行")}</p>
         <div class="q">用信号详情继续</div>
-        <p>点击源码中的信号名，右侧会显示用途、生效条件和可直接跳转的行号。</p>
+        <p>点击源码中的信号名，右侧会显示用途、声明位宽和可直接跳转的行号；选中后可用上方“上一处 / 下一处”在当前文件内逐处核对。</p>
       </div>`;
     $("#codeFileSelect").addEventListener("change", (event) => {
       state.codeFile = event.target.value;
       state.codeLine = 1;
+      state.codeJump = 1;
       buildSidebar();
       renderCode();
     });
-    requestAnimationFrame(() => {
-      const target = $(`.cl[data-line="${state.codeLine}"]`);
-      if (target) target.scrollIntoView({ block: "center", inline: "nearest" });
-    });
+    const previous = $("#sigPrevBtn");
+    if (previous) previous.addEventListener("click", () => stepSignalPosition(-1));
+    const next = $("#sigNextBtn");
+    if (next) next.addEventListener("click", () => stepSignalPosition(1));
+    const copy = $("#sigCopyBtn");
+    if (copy) copy.addEventListener("click", () => copyCodePosition(state.codeFile, state.codeLine));
+    centerCodeLine(state.codeJump || state.codeLine);
+    state.codeJump = null;
   }
 
   function waveSvg() {
@@ -1494,25 +1869,91 @@
     if (reveal && matchMedia("(max-width:1180px)").matches) openPanel("inspector");
   }
 
-  function inspectSignal(name, reveal = true) {
-    const signal = D.signals[name];
-    if (!signal) return;
+  function placeSignalInCode(name, originFile, semantic) {
+    const positions = allSignalPositions(name);
+    if (!positions.length) return;
+    const signal = D.signals[name] || {};
+    const declaration = semantic && semantic.declaration;
+    const preferredFiles = [
+      originFile,
+      state.codeFile,
+      signal.file,
+      declaration && declaration.file
+    ].filter(Boolean);
+    const targetFile = preferredFiles.find(
+      (file) => positions.some((item) => item.file === file)
+    ) || positions[0].file;
+    const currentExact = positions.some(
+      (item) => item.file === state.codeFile && item.line === Number(state.codeLine)
+    );
+    if (currentExact) return;
+    const target = positions.find((item) => item.file === targetFile) || positions[0];
+    state.codeFile = target.file;
+    state.codeLine = target.line;
+    state.codeJump = target.line;
+  }
+
+  function inspectSignal(name, reveal = true, originFile = "") {
+    const signal = D.signals[name] || null;
+    const clickedModule = originFile ? moduleAt(originFile, state.codeLine) : null;
+    const semantic = window.SigSem
+      ? window.SigSem.analyze(name, {
+        module: clickedModule ? clickedModule.name : signal && signal.module,
+        file: originFile || (signal && signal.file) || state.codeFile,
+        line: originFile ? state.codeLine : signal && signal.line
+      })
+      : null;
+    if (!signal && !(semantic && (semantic.declaration || semantic.declarations.length))) return;
+
     state.signal = name;
     state.constant = null;
     state.constantFile = null;
-    if (signal.module && moduleByName(signal.module)) state.module = signal.module;
-    state.inspect = { type: "signal", id: name };
+    const declaration = semantic && semantic.declaration;
+    const sourceFile = (declaration && declaration.file) ||
+      (signal && signal.file) || originFile || state.codeFile;
+    const sourceLine = (declaration && declaration.line) ||
+      (signal && signal.line) || Number(state.codeLine) || 1;
+    const owner = moduleAt(sourceFile, sourceLine);
+    const moduleName = owner ? owner.name : (signal && signal.module) || (semantic && semantic.module) || "";
+    if (moduleName && moduleByName(moduleName)) state.module = moduleName;
+    const width = (semantic && semantic.storageText) ||
+      (semantic && semantic.widthText) || (signal && signal.width) || "未知";
+    const kind = semantic && semantic.isMemory
+      ? "memory"
+      : (semantic && semantic.kind) || (signal && signal.kind) || "source";
+    const purpose = signal
+      ? signal.purpose
+      : "该对象由源码声明自动识别；当前数据没有提供人工用途说明。";
+    const timing = signal
+      ? signal.timing
+      : semantic && semantic.isMemory
+        ? "容量与位宽来自声明；实际读写时序需结合使能条件和 always 块核对。"
+        : "没有人工时序说明；请展开代码依据核对声明和赋值上下文。";
+    const rules = (signal && signal.rules) || [
+      "自动识别项没有人工规则说明，以声明和代码依据为准。"
+    ];
+    const related = (signal && signal.related) || [];
+    const evidence = uniqueEvidence([
+      ...((signal && signal.evidence) || []),
+      ...((semantic && semantic.evidence) || []).map((item) => ({
+        file: item.file,
+        line: item.line,
+        note: [item.label, item.text].filter(Boolean).join(" · ")
+      }))
+    ]);
+    state.inspect = { type: "signal", id: name, originFile };
     $("#inspType").textContent = "信号详情";
     $("#inspBody").innerHTML = `
       <div class="i-title">${esc(name)}</div>
-      <div class="i-sub">${esc(signal.module)}${signal.instance ? ` · ${esc(signal.instance)}` : ""} · ${esc(signal.file)}:${signal.line}</div>
-      <div class="sem-meta">${esc(signal.kind)} · ${esc(signal.width)}</div>
-      <p class="insp-summary">${esc(signal.purpose)}</p>
-      <div class="i-sec"><h5>生效条件</h5><p>${esc(signal.timing)}</p></div>
-      <details class="sem-fold"><summary>规则与边界 <span>${signal.rules.length} 条</span></summary><div class="sem-fold-b"><ul class="hlist">${signal.rules.map((rule) => `<li>${esc(rule)}</li>`).join("")}</ul></div></details>
-      <details class="sem-fold"><summary>相关信号 <span>${signal.related.length} 个</span></summary><div class="sem-fold-b"><div class="row">${signal.related.map((item) => `<button type="button" class="sem-chip" data-signal="${esc(item)}">${esc(item)}</button>`).join("")}</div></div></details>
-      ${signal.evidence && signal.evidence.length ? `<details class="sem-fold"><summary>源码依据 <span>${signal.evidence.length} 处</span></summary><div class="sem-fold-b">${evidenceHtml(signal.evidence)}</div></details>` : ""}
-      <div class="i-actions"><button type="button" class="btn sm" data-code="${esc(signal.file)}" data-line="${signal.line}">定位源码 →</button></div>`;
+      <div class="i-sub">${moduleName ? `${esc(moduleName)}${signal && signal.instance ? ` · ${esc(signal.instance)}` : ""} · ` : ""}${esc(sourceFile)}:${sourceLine}</div>
+      <div class="sem-meta">${esc(kind)} · ${esc(width)}${semantic && semantic.width != null ? " · 声明解析" : ""}</div>
+      <p class="insp-summary">${esc(purpose)}</p>
+      <div class="i-sec"><h5>生效条件</h5><p>${esc(timing)}</p></div>
+      ${rules.length ? `<details class="sem-fold"><summary>规则与边界 <span>${rules.length} 条</span></summary><div class="sem-fold-b"><ul class="hlist">${rules.map((rule) => `<li>${esc(rule)}</li>`).join("")}</ul></div></details>` : ""}
+      ${related.length ? `<details class="sem-fold"><summary>相关信号 <span>${related.length} 个</span></summary><div class="sem-fold-b"><div class="row">${related.map((item) => `<button type="button" class="sem-chip" data-signal="${esc(item)}">${esc(item)}</button>`).join("")}</div></div></details>` : ""}
+      ${evidence.length ? `<details class="sem-fold"><summary>代码依据 <span>${evidence.length} 个位置</span></summary><div class="sem-fold-b">${evidenceHtml(evidence)}</div></details>` : ""}
+      <div class="i-actions"><button type="button" class="btn sm" data-code="${esc(sourceFile)}" data-line="${sourceLine}">定位源码 →</button></div>`;
+    if (state.tab === "code" || originFile) placeSignalInCode(name, originFile, semantic);
     buildSidebar();
     if (reveal && matchMedia("(max-width:1180px)").matches) openPanel("inspector");
   }
@@ -1578,7 +2019,7 @@
   function refreshInspector() {
     const context = state.inspect || { type: "module", id: state.module };
     if (context.type === "constant") return inspectConstant(context.id, context.file, false);
-    if (context.type === "signal" && D.signals[context.id]) return inspectSignal(context.id, false);
+    if (context.type === "signal") return inspectSignal(context.id, false, context.originFile || "");
     if (context.type === "edge") return inspectEdge(context.id, false);
     if (context.type === "state" && D.fsm) return inspectState(context.id, false);
     return inspectModule(state.module, false);
@@ -1644,6 +2085,30 @@
   }
 
   function go(tab, options = {}) {
+    if (
+      tab === "code" &&
+      state.tab !== "code" &&
+      !options.anchor &&
+      state.inspect &&
+      state.inspect.type === "module"
+    ) {
+      const module = moduleByName(state.inspect.id);
+      if (module && D.files[module.file]) {
+        state.codeFile = module.file;
+        state.codeLine = module.start;
+        state.codeJump = module.start;
+      }
+    }
+    if (
+      tab === "code" &&
+      state.tab !== "code" &&
+      !options.anchor &&
+      state.inspect &&
+      state.inspect.type === "signal" &&
+      state.signal
+    ) {
+      placeSignalInCode(state.signal, state.inspect.originFile || "", null);
+    }
     state.tab = tab;
     if (options.scenario) {
       state.scenario = options.scenario;
@@ -1660,9 +2125,11 @@
 
   function openCode(file, line) {
     if (!D.files[file]) return;
+    if (!state.inspect || state.inspect.type !== "signal") state.signal = null;
     state.codeFile = file;
     state.codeLine = Math.max(1, Number(line) || 1);
-    go("code");
+    state.codeJump = state.codeLine;
+    go("code", { anchor: true });
   }
 
   document.addEventListener("click", (event) => {
@@ -1708,13 +2175,27 @@
       return;
     }
 
+    const copy = event.target.closest("[data-copy-file]");
+    if (copy) {
+      event.preventDefault();
+      event.stopPropagation();
+      return copyCodePosition(copy.dataset.copyFile, Number(copy.dataset.copyLine));
+    }
+
     const constant = event.target.closest("[data-const]");
     if (constant) return inspectConstant(constant.dataset.const, constant.dataset.file);
 
     const signal = event.target.closest("[data-signal]");
     if (signal) {
       const previousModule = state.module;
-      inspectSignal(signal.dataset.signal);
+      const row = signal.closest("[data-line]");
+      const originFile = signal.dataset.file || (row ? state.codeFile : "");
+      if (state.tab === "code" && row) {
+        state.codeLine = Number(row.dataset.line);
+        state.codeJump = state.codeLine;
+      }
+      inspectSignal(signal.dataset.signal, state.tab !== "code", originFile);
+      if (state.tab === "code") renderCode();
       if ((state.tab === "overview" || state.tab === "structure") && previousModule !== state.module) {
         if (state.tab === "structure") state.focus = state.module;
         renderMain();

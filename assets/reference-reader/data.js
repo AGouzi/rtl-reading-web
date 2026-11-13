@@ -945,6 +945,104 @@ endmodule`
     }
   },
 
+  wave: {
+    source: {
+      script: "wave-demo.js",
+      global: "DEMO_WAVE_VCD",
+      metaGlobal: "DEMO_WAVE_META"
+    },
+    groups: [
+      {
+        name: "时钟与复位",
+        paths: ["tb.clk", "tb.rst_n"]
+      },
+      {
+        name: "请求接口",
+        paths: ["tb.req_valid", "tb.req_opcode", "tb.req_ready"]
+      },
+      {
+        name: "路由状态",
+        paths: ["tb.dut.state", "tb.dut.req_valid_q", "tb.dut.work_valid", "tb.dut.work_ready"]
+      },
+      {
+        name: "响应接口",
+        paths: ["tb.dut.resp_valid", "tb.dut.resp_ready"]
+      },
+      {
+        name: "状态与错误",
+        paths: ["tb.dut.req_error", "tb.dut.status_count", "tb.dut.packet_magic"]
+      }
+    ],
+    scenarios: [
+      {
+        key: "normal",
+        label: "正常请求",
+        start: "0 ns",
+        end: "110 ns",
+        cursor: "25 ns",
+        markers: [
+          { time: "15 ns", label: "复位释放" },
+          { time: "25 ns", label: "采样请求" },
+          { time: "45 ns", label: "完成", tone: "done" }
+        ]
+      },
+      {
+        key: "illegal",
+        label: "非法操作码",
+        start: "110 ns",
+        end: "220 ns",
+        cursor: "125 ns",
+        markers: [
+          { time: "121 ns", label: "opcode=0" },
+          { time: "135 ns", label: "错误码", tone: "done" }
+        ]
+      },
+      {
+        key: "backpressure",
+        label: "响应反压",
+        start: "270 ns",
+        end: "430 ns",
+        cursor: "305 ns",
+        markers: [
+          { time: "305 ns", label: "resp_ready=0" },
+          { time: "385 ns", label: "恢复" },
+          { time: "395 ns", label: "释放", tone: "done" }
+        ]
+      }
+    ],
+    bitSplit: {
+      "tb.req_opcode": {
+        bits: [7, 6, 5, 4, 3, 2, 1, 0],
+        group: "请求总线 · 位展开",
+        selected: true
+      }
+    },
+    stateMaps: {
+      "tb.dut.state": {
+        0: "IDLE",
+        1: "ACTIVE",
+        2: "DONE"
+      }
+    },
+    signalInfo: {
+      "tb.clk": { file: "demo_pipeline.sv", line: 2, purpose: "测试平台产生的 100 MHz 演示时钟。" },
+      "tb.rst_n": { file: "demo_pipeline.sv", line: 3, purpose: "异步低有效复位；释放后模块开始采样请求。" },
+      "tb.req_valid": { signal: "req_valid", file: "ingress_stage.sv", line: 4, purpose: "请求有效位；在 req_ready 同时有效的时钟沿被接受。" },
+      "tb.req_opcode": { signal: "req_opcode", file: "ingress_stage.sv", line: 5, purpose: "8 bit 请求类型；0 被演示逻辑判为非法。" },
+      "tb.req_ready": { signal: "req_ready", file: "ingress_stage.sv", line: 6, purpose: "输入检查层的接收许可。" },
+      "tb.dut.state": { signal: "route_state", file: "work_router.sv", line: 15, purpose: "路由状态机的状态寄存器。" },
+      "tb.dut.req_valid_q": { signal: "req_valid_i", file: "ingress_stage.sv", line: 7, purpose: "输入检查后寄存一拍的请求有效位。" },
+      "tb.dut.work_valid": { signal: "work_valid", file: "work_router.sv", line: 7, purpose: "向执行层发出的有效请求。" },
+      "tb.dut.work_ready": { signal: "work_ready", file: "work_router.sv", line: 8, purpose: "执行层返回的接收许可。" },
+      "tb.dut.resp_valid": { signal: "resp_valid", file: "response_stage.sv", line: 5, purpose: "待下游接收的响应有效位。" },
+      "tb.dut.resp_ready": { signal: "resp_ready", file: "response_stage.sv", line: 6, purpose: "下游接收许可；为 0 时响应保持。" },
+      "tb.dut.req_error": { signal: "req_error", file: "ingress_stage.sv", line: 8, purpose: "请求格式错误码。" },
+      "tb.dut.status_count": { signal: "status_count", file: "status_counter.sv", line: 6, purpose: "事件计数寄存器。" },
+      "tb.dut.packet_magic": { signal: "packet_magic", file: "ingress_stage.sv", line: 24, purpose: "单 bit 魔数命中标记；位宽直接来自声明。" }
+    },
+    sampling: "按 VCD 时间戳取值；cycle 取游标之前最近一个 clk 上升沿。"
+  },
+
   validation: {
     summary: { benches: 4, cases: 16, checks: 48, status: "虚构示例" },
     benches: [

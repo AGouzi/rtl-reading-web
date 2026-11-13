@@ -456,9 +456,12 @@ button.sem-chip:not(.q)::after{content:" ↗";opacity:.7;font-family:var(--ui)}
 .wave-sigs .search{width:100%;margin-bottom:6px}
 .wave-sig-tree{font-size:12px}
 .wv-group{margin-bottom:5px}
-.wv-group-h{font-size:10.5px;letter-spacing:.6px;color:var(--dim2);padding:4px 5px;background:var(--panel3);border-radius:3px;text-transform:uppercase}
+.wv-group-h{font-size:10.5px;letter-spacing:.6px;color:var(--dim2);padding:4px 5px;background:var(--panel3);border-radius:3px;text-transform:uppercase;display:flex;justify-content:space-between;gap:6px}
+.wv-group-h span{font-family:var(--mono);font-size:9.5px;color:var(--dim2)}
 .wv-ch{display:flex;align-items:center;gap:5px;padding:3px 4px;border-radius:3px;cursor:pointer;line-height:1.35}
 .wv-ch:hover{background:var(--hover)}
+.wv-ch.on{background:var(--sel);box-shadow:inset 2px 0 0 var(--acc)}
+.wv-ch.on .wv-ch-name{color:var(--sel-tx);font-weight:600}
 .wv-ch input{margin:0;accent-color:var(--acc)}
 .wv-ch-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
 .wv-ch em{font-style:normal;color:var(--dim2);font-size:10px}
@@ -470,11 +473,17 @@ button.sem-chip:not(.q)::after{content:" ↗";opacity:.7;font-family:var(--ui)}
 .wv-grouprow{height:22px;display:flex;align-items:center;padding:0 7px;background:var(--wave-group);color:var(--acc);font-size:10px;letter-spacing:.45px;border-bottom:1px solid var(--wave-line)}
 .wv-sigrow{height:24px;display:flex;align-items:center;gap:6px;padding:0 7px;border-bottom:1px solid var(--wave-line);cursor:pointer;overflow:hidden}
 .wv-sigrow:hover{background:var(--sel)}
+.wv-sigrow.on{background:var(--sel);box-shadow:inset 2px 0 0 var(--acc)}
+.wv-sigrow.on .mono{color:var(--sel-tx);font-weight:600}
 .wv-sigrow .mono{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px}
 .wv-sigrow em{font-style:normal;color:var(--dim2);font-size:9.5px}
 .wv-canvas-wrap{flex:1;min-width:0}
 #waveCanvas{display:block;cursor:crosshair;max-width:none}
+#waveCanvas:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
 .wave-foot{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--dim)}
+.wave-sep{width:1px;height:18px;background:var(--line);flex:none}
+.wave-hint{margin-left:auto}
+.wave-tools .row{gap:4px}
 .wave-load{margin-top:8px}
 .wave-progress{height:7px;background:var(--panel3);border:1px solid var(--line);border-radius:4px;overflow:hidden;margin-bottom:7px}
 .wave-progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--grn));transition:width .15s}
@@ -488,6 +497,7 @@ button.sem-chip:not(.q)::after{content:" ↗";opacity:.7;font-family:var(--ui)}
 @media (max-width:1180px){
   .wave-work{grid-template-columns:210px minmax(0,1fr)}
   .wv-labels{width:190px}
+  .wave-hint{display:none}
 }
 @media (max-width:860px){
   .wave-work{grid-template-columns:1fr}

@@ -2,7 +2,7 @@
 
 **代码写快了，读的人得有工具跟上。**
 
-给 AI 编码助手一个技能：输入 Verilog / SystemVerilog / VHDL，输出一个可离线打开的中文阅读工作台。**模块层级、一笔事务、关键信号、源码行号**放在同一页上，读的人不用在编辑器、波形、文档和聊天窗口之间来回找。
+给 AI 编码助手一个技能：输入 Verilog / SystemVerilog / VHDL（可选真实 VCD），输出一个可离线打开的中文阅读工作台。**模块层级、一笔事务、关键信号、源码行号、真实 VCD 波形**放在同一页上，读的人不用在编辑器、波形、文档和聊天窗口之间来回找。
 
 它服务两类最常见的阅读：**AI 生成的 RTL**，和**别人写的 RTL**（交接、代码评审、第三方 IP）。
 
@@ -72,7 +72,15 @@ RTL Reading Web 换了一个交付物：**不是文档，是工作台**。
 
 信号、常量、模块和关键条件都可以定位到真实源码。信号位宽从声明和 `localparam/parameter` 表达式解析，标量无范围声明为 1 bit，数组则把 packed 范围解析为元素位宽、unpacked 范围解析为深度，例如 `64 bit × 8 项`；`ram_style` 等属性前缀不会妨碍识别，也不会被当成 BRAM 综合结论。不从赋值字面量或相邻总线推断宽度。常量按编译期对象解释；`parameter` 还会列出上级实例、`#(...)` 覆盖表达式、默认/覆盖采用结论，`localparam` 明确不可覆盖。从详情跳到代码或证据行时，右栏保持当前对象，不会切回模块上下文。跳转后目录同步、目标行在代码容器内居中并高亮；选中模块后进入代码导航，会打开该模块文件并定位起始行。选中信号后可用“本文件 上一处 / 下一处 / 复制位置”逐处跳转，同名信号不会把导航带到其他 `.v`；代码依据按文件行号去重。未登记在展示索引、但源码中已声明的数组/寄存器同样可点击。代码字体栈含中文回退，注释保持正体，避免锐利回退字形和合成斜体。
 
-### 5. 仿真验证：没有报告就不生成通过率
+### 5. 时序波形：真实 VCD 才进入查看器
+
+有 VCD 时默认提供完整查看器：左侧按“时钟复位 / 接口 / 状态 / 错误”分组并支持搜索，中间可切换场景、拖动游标、输入 time/cycle、缩放、适配和播放；底部按时间戳列出当前采样与变化事件。总线可以展开成真实位线，例如 `req_opcode[7]` 到 `req_opcode[0]`，每个位值都逐位取自 VCD。没有 VCD 时显示明确空状态，不生成静态示意采样。
+
+![时序波形：信号树、场景、游标、缩放和总线拆位](docs/screenshots/timing.png)
+
+参考页用 22 个信号缩小演示；实际页面读取完整 VCD，信号总数不设上限，分组只决定常用入口，搜索仍覆盖全部变量。
+
+### 6. 仿真验证：没有报告就不生成通过率
 
 没有报告就不生成通过率、覆盖率或“已验证”徽标。有报告时也标清数据源、日期、配置和适用范围。
 
@@ -194,11 +202,14 @@ doc/rtl-reading-web/
 ├── style.css
 ├── data.js
 ├── semantics.js
+├── wave-core.js
+├── wave.js
+├── wave-vcd.js                  # 仅真实 VCD 时生成
 ├── app.js
 └── source-manifest.json
 ```
 
-`source-manifest.json` 记录顶层、参数/宏配置、文件逻辑路径、SHA-256 和生成时间。页面里的源码、行号、层级、端口映射和信号说明都绑定同一份快照；源码更新后需要重新核对，而不是只替换文字。
+`wave-vcd.js` 只在有真实 VCD 时生成，保存只读的 VCD 文本全局变量；没有波形时删掉。`source-manifest.json` 记录顶层、参数/宏配置、文件逻辑路径、SHA-256 和生成时间。页面里的源码、行号、层级、端口映射和信号说明都绑定同一份快照；源码更新后需要重新核对，而不是只替换文字。
 
 ---
 
@@ -299,6 +310,8 @@ Instead of a long, confident-sounding summary, it generates a seven-tab static s
 - Code navigation
 - Timing / waveform
 - Simulation evidence
+
+With a real VCD, the timing tab includes a grouped signal tree, scenario windows, a draggable cursor, time/cycle entry, zoom/fit, playback, timestamped samples, and real bit-level expansion for buses such as `oPhy_ds[7:0]`. Without a VCD, the page shows an explicit empty state instead of a fabricated waveform.
 
 Every important claim links back to a real file and line. Signals are explained by purpose, update condition, reset behavior, sources, and consumers. When waveform or verification data is missing, the page says so instead of fabricating evidence.
 

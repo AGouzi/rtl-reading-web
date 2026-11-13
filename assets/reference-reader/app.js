@@ -21,6 +21,9 @@
     ["timing", "时序波形"],
     ["verify", "仿真验证"]
   ];
+  const initialTab = TABS.some(([id]) => id === location.hash.replace(/^#\/?/, ""))
+    ? location.hash.replace(/^#\/?/, "")
+    : "overview";
 
   const rootModule = D.modules.find((item) => !item.parent) || D.modules[0];
   const moduleByName = (name) => D.modules.find((item) => item.name === name);
@@ -145,7 +148,7 @@
     constants.find((item) => item.name === name && item.file === file) || null;
 
   const state = {
-    tab: "overview",
+    tab: initialTab,
     module: rootModule.name,
     focus: rootModule.name,
     signal: "req_valid",
@@ -159,6 +162,8 @@
     codeLine: 17,
     codeJump: 17,
     bench: null,
+    waveChannel: null,
+    waveSource: null,
     inspect: { type: "module", id: rootModule.name }
   };
 
@@ -175,6 +180,7 @@
     const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     $("#themeBtn").textContent = next === "dark" ? "浅色" : "深色";
+    if (window.WaveUI) WaveUI.redraw();
     try {
       localStorage.setItem("demo-reader-theme", next);
     } catch (_) {}
@@ -1743,45 +1749,28 @@
     state.codeJump = null;
   }
 
-  function waveSvg() {
-    const rows = [
-      ["req_valid", ["0", "1", "1", "0"]],
-      ["req_opcode", ["00", "01", "01", "00"]],
-      ["work_done", ["0", "0", "1", "0"]],
-      ["resp_valid", ["0", "0", "1", "1"]],
-      ["resp_ready", ["0", "0", "0", "1"]]
-    ];
-    const rowHeight = 34;
-    const cell = 150;
-    const shapes = rows.map(([, values], row) => {
-      const y = 22 + row * rowHeight;
-      const levels = values.map((value) => value === "0" || value === "00" ? 24 : 6);
-      let path = `M0 ${y + levels[0]}`;
-      for (let i = 1; i < levels.length; i += 1) {
-        const x = i * cell;
-        path += ` H${x} V${y + levels[i]}`;
-      }
-      path += ` H${cell * levels.length}`;
-      return `<path d="${path}" fill="none" stroke="var(--wave-bit)" stroke-width="2"></path>`;
-    }).join("");
-    return `<svg width="600" height="190" viewBox="0 0 600 190" aria-label="虚构时序波形示例">
-      <rect width="600" height="190" fill="var(--wave-bg)"></rect>
-      ${[0, 1, 2, 3].map((i) => `<line x1="${i * 150}" y1="18" x2="${i * 150}" y2="184" stroke="var(--wave-grid)"></line><text x="${i * 150 + 5}" y="14" fill="var(--wave-ruler)" font-size="10">C${i}</text>`).join("")}
-      ${shapes}
-    </svg>`;
-  }
-
   function renderTiming() {
+    if (window.WaveUI) WaveUI.dispose();
+    if (D.wave && window.WaveUI) {
+      $("#main").innerHTML = '<div id="timingWaveRoot"></div>';
+      WaveUI.mount($("#timingWaveRoot"), D.wave, {
+        onSignal: (channel) => inspectWaveSignal(channel),
+        onSource: (model) => inspectWaveSource(model)
+      });
+      return;
+    }
+    const message = D.wave
+      ? "wave.js 或 wave-core.js 未加载，无法建立查看器。"
+      : "当前快照没有附带可读取的 VCD。";
     $("#main").innerHTML = `
-      <div class="page-h"><div><div class="ttl">时序波形</div><div class="sub">只在有可信波形数据时展示采样时刻与值。</div></div><span class="chip">虚构波形示例</span></div>
-      <div class="note amber">这是参考模板的虚构波形，用于展示布局。生成真实工程页时，没有 VCD/WLF 或仿真报告就不要显示本页的实测结论。</div>
-      <article class="card" style="margin-top:12px">
-        <div class="wave-tools"><span class="mono small">正常请求 · 4 拍窗口</span><button type="button" class="btn sm" data-go="code">从波形回到源码</button></div>
-        <div class="wave-shell"><div class="wave-body">
-          <div class="wave-labels"><div class="wl mod">pipeline</div><div class="wl">req_valid</div><div class="wl">req_opcode</div><div class="wl">work_done</div><div class="wl">resp_valid</div><div class="wl">resp_ready</div></div>
-          <div class="wave-scroll">${waveSvg()}</div>
-        </div></div>
-        <div class="wave-info"><span>采样：clk 上升沿</span><span>范围：C0–C3</span><span>来源：模板虚构</span></div>
+      <div class="page-h"><div><div class="ttl">时序波形</div><div class="sub">波形页只读取真实 VCD；没有数据时不生成示意采样。</div></div><span class="chip">无可用波形</span></div>
+      <article class="card">
+        <h3>${esc(message)}</h3>
+        <p class="small muted">补充 VCD 后，本页提供信号树、场景窗口、时间游标、缩放/适配、播放和总线位展开；所有值按时间戳读取，X/Z 原样保留。</p>
+        <pre class="code-how">initial begin
+  $dumpfile("wave.vcd");
+  $dumpvars(1, tb);
+end</pre>
       </article>`;
   }
 
@@ -1958,6 +1947,70 @@
     if (reveal && matchMedia("(max-width:1180px)").matches) openPanel("inspector");
   }
 
+  function inspectWaveSignal(channel, reveal = true) {
+    if (!channel) return;
+    state.waveChannel = channel;
+    state.constant = null;
+    state.constantFile = null;
+    state.inspect = { type: "wave", id: channel.path };
+    const info = channel.info || {};
+    const linkedName = info.signal || channel.name;
+    const linked = D.signals[linkedName] || null;
+    const sourceFile = info.file || (linked && linked.file) || "";
+    const sourceLine = info.line || (linked && linked.line) || 1;
+    const purpose = info.purpose ||
+      (linked && linked.purpose) ||
+      "该信号由 VCD 直接采样；当前数据没有提供人工用途说明。";
+    $("#inspType").textContent = "波形信号";
+    $("#inspBody").innerHTML = `
+      <div class="i-title">${esc(channel.name)}</div>
+      <div class="i-sub">${esc(channel.path)} · ${channel.width} bit · ${esc(channel.type)}</div>
+      <div class="sem-meta">游标 ${esc(channel.timeText)} · cycle ${channel.cycle}</div>
+      <p class="insp-summary">${esc(purpose)}</p>
+      <div class="i-sec"><h5>当前采样</h5><table class="t insp-kv"><tbody>
+        <tr><td>显示值</td><td class="mono">${esc(channel.displayValue)}</td></tr>
+        <tr><td>VCD 原始值</td><td class="mono">${esc(channel.rawValue)}</td></tr>
+        <tr><td>作用域</td><td class="mono">${esc(channel.scope || "—")}</td></tr>
+        ${channel.parentPath ? `<tr><td>所属总线</td><td class="mono">${esc(channel.parentPath)}</td></tr>` : ""}
+      </tbody></table></div>
+      <div class="note">值来自波形时间戳，不做插值；状态名来自数据配置或源码编码。</div>
+      <div class="i-actions">
+        ${sourceFile ? `<button type="button" class="btn sm" data-code="${esc(sourceFile)}" data-line="${sourceLine}">定位源码 →</button>` : ""}
+        ${linked ? `<button type="button" class="btn sm" data-signal="${esc(linkedName)}">查看信号详情</button>` : ""}
+      </div>`;
+    buildSidebar();
+    if (reveal && matchMedia("(max-width:1180px)").matches) openPanel("inspector");
+  }
+
+  function inspectWaveSource(model, reveal = true) {
+    const source = model && model.source
+      ? model.source
+      : model && model.file
+        ? model
+        : (D.wave && D.wave.source) || {};
+    state.waveSource = source;
+    state.inspect = { type: "wave-source", id: source.file || "vcd" };
+    const modelData = model && model.baseChannels ? model : (window.WaveUI && WaveUI.model);
+    const signalCount = modelData
+      ? modelData.baseChannels.length + " 基础 + " + modelData.bitChannels.length + " 拆位"
+      : "未加载";
+    $("#inspType").textContent = "波形来源";
+    $("#inspBody").innerHTML = `
+      <div class="i-title">${esc(source.file || "VCD")}</div>
+      <div class="i-sub">${esc(source.simulator || "仿真器未标注")}</div>
+      <p class="insp-summary">${esc(source.note || "波形值按 VCD 时间戳读取，保留 X/Z，不做插值或推测。")}</p>
+      <div class="i-sec"><h5>数据口径</h5><table class="t insp-kv"><tbody>
+        <tr><td>时间精度</td><td class="mono">${esc(source.timescale || (modelData && modelData.timescale.text) || "未标注")}</td></tr>
+        <tr><td>生成时间</td><td class="mono">${esc(source.generated || "未标注")}</td></tr>
+        <tr><td>信号数量</td><td class="mono">${esc(signalCount)}</td></tr>
+        <tr><td>时钟路径</td><td class="mono">${esc(modelData && modelData.clockPath ? modelData.clockPath : "未识别")}</td></tr>
+      </tbody></table></div>
+      ${source.testbench ? `<div class="i-sec"><h5>测试平台</h5><p class="mono small">${esc(source.testbench)}</p></div>` : ""}
+      ${source.fictional ? '<div class="note amber">这是参考页的虚构演示波形，只用于展示查看器交互，不代表任何工程实测结果。</div>' : ""}
+      <div class="note">波形只覆盖该文件、该时间窗口和该次仿真配置；不能替代时序签核、CDC 检查或上板验证。</div>`;
+    if (reveal && matchMedia("(max-width:1180px)").matches) openPanel("inspector");
+  }
+
   function inspectEdge(id, reveal = true) {
     const edge = edgeById(id);
     if (!edge) return;
@@ -2018,6 +2071,8 @@
 
   function refreshInspector() {
     const context = state.inspect || { type: "module", id: state.module };
+    if (context.type === "wave") return inspectWaveSignal(state.waveChannel, false);
+    if (context.type === "wave-source") return inspectWaveSource(state.waveSource, false);
     if (context.type === "constant") return inspectConstant(context.id, context.file, false);
     if (context.type === "signal") return inspectSignal(context.id, false, context.originFile || "");
     if (context.type === "edge") return inspectEdge(context.id, false);
@@ -2026,6 +2081,7 @@
   }
 
   function renderMain() {
+    if (state.tab !== "timing" && window.WaveUI) WaveUI.dispose();
     const renderers = {
       overview: renderOverview,
       structure: renderStructure,
@@ -2047,7 +2103,7 @@
       dataflow: "单击步骤查看条件、模块和源码",
       control: "单击状态查看转移条件",
       code: "点击信号名查看用途与生效条件",
-      timing: "波形只在有真实数据时展示",
+      timing: D.wave ? "勾选信号、切换场景；拖拽或输入时间移动游标" : "波形只在有真实数据时展示",
       verify: "验证记录只来自可读报告"
     };
     setHint(hints[state.tab] || "选择模块、信号或源码入口查看上下文");
@@ -2110,6 +2166,9 @@
       placeSignalInCode(state.signal, state.inspect.originFile || "", null);
     }
     state.tab = tab;
+    try {
+      history.replaceState(null, "", "#" + tab);
+    } catch (_) {}
     if (options.scenario) {
       state.scenario = options.scenario;
       state.step = options.step !== undefined ? options.step : 0;

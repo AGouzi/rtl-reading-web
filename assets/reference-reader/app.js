@@ -161,6 +161,9 @@
     codeFile: "demo_pipeline.sv",
     codeLine: 17,
     codeJump: 17,
+    codeQuery: "",
+    codeSearchLine: null,
+    codeSearchAt: -1,
     bench: null,
     waveChannel: null,
     waveSource: null,
@@ -224,6 +227,37 @@
     return roots.map((root) => render(root, 0)).join("");
   }
 
+  const sourceSymbolCache = new Map();
+  let allSourceSymbolCache = null;
+  function sourceSymbolsForFile(file) {
+    if (sourceSymbolCache.has(file)) return sourceSymbolCache.get(file);
+    const found = [];
+    const symbols = window.SigSem ? window.SigSem.symbols(file) : new Set();
+    symbols.forEach((name) => {
+      const known = D.signals[name];
+      if (known && known.file === file) return;
+      const positions = window.SigSem
+        ? window.SigSem.positions(name, { file })
+        : [];
+      const line = positions.length ? positions[0].line : 1;
+      const owner = moduleAt(file, line);
+      found.push({
+        name,
+        file,
+        module: owner ? owner.name : "",
+        line,
+        kind: "source"
+      });
+    });
+    sourceSymbolCache.set(file, found);
+    return found;
+  }
+  function sourceSymbolIndex() {
+    if (allSourceSymbolCache) return allSourceSymbolCache;
+    allSourceSymbolCache = Object.keys(D.files).flatMap((file) => sourceSymbolsForFile(file));
+    return allSourceSymbolCache;
+  }
+
   function paintSidebarList(query) {
     const q = String(query || "").trim().toLowerCase();
     const signals = signalNames
@@ -236,6 +270,20 @@
         </button>`;
       })
       .join("");
+    const symbolSource = q ? sourceSymbolIndex() : sourceSymbolsForFile(state.codeFile);
+    const sourceSymbols = symbolSource
+      .filter((item) =>
+        !q ||
+        item.name.toLowerCase().includes(q) ||
+        item.file.toLowerCase().includes(q) ||
+        item.module.toLowerCase().includes(q))
+      .filter((item) => q || item.file === state.codeFile)
+      .slice(0, q ? 100 : 24)
+      .map((item) =>
+        `<button class="sigitem${state.signal === item.name && state.codeFile === item.file ? " on" : ""}" data-signal="${esc(item.name)}" data-file="${esc(item.file)}" title="${esc(item.name)} · ${esc(item.file)}:${item.line} · 由源码声明自动识别">
+          <span>${esc(item.name)}</span><span class="d">${esc(item.module || item.file.replace(/\.[^.]+$/, ""))}</span>
+        </button>`)
+      .join("");
     const consts = constants
       .filter((item) => !q || item.name.toLowerCase().includes(q) || item.note.toLowerCase().includes(q))
       .slice(0, 40)
@@ -244,14 +292,17 @@
       </button>`)
       .join("");
     $("#sigList").innerHTML =
-      signals + (consts ? `<div class="tiny dim2" style="padding:8px 6px 2px">常量</div>${consts}` : "") ||
+      signals +
+      (sourceSymbols ? `<div class="tiny dim2" style="padding:8px 6px 2px">源码声明</div>${sourceSymbols}` : "") +
+      (consts ? `<div class="tiny dim2" style="padding:8px 6px 2px">常量</div>${consts}` : "") ||
       '<div class="tiny dim2" style="padding:7px 6px">没有匹配信号</div>';
   }
 
   function buildSidebar() {
     $("#modTree").innerHTML = moduleTree();
-    $("#sigCount").textContent = constants.length
-      ? `${signalNames.length} 信号 · ${constants.length} 常量`
+    const sourceCount = sourceSymbolsForFile(state.codeFile).length;
+    $("#sigCount").textContent = constants.length || sourceCount
+      ? `${signalNames.length} 映射 · ${sourceCount} 本文件自动${constants.length ? ` · ${constants.length} 常量` : ""}`
       : `${signalNames.length} 个`;
     paintSidebarList($("#sigSearch").value);
     $("#fileCount").textContent = `${Object.keys(D.files).length} 个`;
@@ -1048,6 +1099,10 @@
 
   function internalShape(node, width, height) {
     const shape = node.shape || "unit";
+    if (shape === "junction") {
+      const radius = Math.min(width, height) / 2;
+      return `<circle cx="${width / 2}" cy="${height / 2}" r="${radius}"/>`;
+    }
     if (shape === "mux") {
       return `<polygon points="14,0 ${width},0 ${width - 14},${height} 0,${height}"/>`;
     }
@@ -1156,10 +1211,16 @@
     <div class="diagram-crumb">${modulePathHtml(module.name)}</div>`;
   }
 
+  function moduleRoleCard(module) {
+    return `<article class="card role-card">
+      <div class="role-kicker">模块职责</div>
+      <p class="role-statement">${esc(module.role)}</p>
+    </article>`;
+  }
+
   function moduleDetailHtml(module) {
     return `<article class="card module-detail">
       ${detailHead(module)}
-      <p class="insp-summary">${esc(module.role)}</p>
       <div class="note">${esc(module.note)}</div>
       <div class="i-sec"><h5>内部数据通路</h5>
         <div class="diagram internal-diagram">${internalDiagramSvg(module)}</div>
@@ -1183,13 +1244,14 @@
       <span class="chip">${D.modules.length} 个模块 · 虚构示例</span>
     </div>`;
     if (!children.length) {
-      $("#main").innerHTML = `${head}${moduleDetailHtml(focus)}`;
+      $("#main").innerHTML = `${head}${moduleRoleCard(focus)}${moduleDetailHtml(focus)}`;
       return;
     }
     const rows = children.map((item) =>
       `<tr><td class="mono">${esc(item.name)}</td><td>${esc(item.label)}</td><td>${esc(item.role)}</td></tr>`
     ).join("");
     $("#main").innerHTML = `${head}
+      ${moduleRoleCard(focus)}
       ${diagramCard("模块与连接关系", "单击模块进入内部；单击连线查看信号与依据", state.module, focus.name, null)}
       <details class="card fold-card" style="margin-top:12px">
         <summary>子模块职责 <span class="section-meta">${children.length} 个</span></summary>
@@ -1598,8 +1660,7 @@
 
   function signalNavHtml() {
     const name = state.signal;
-    if (!name) return '<span class="tiny dim2 code-nav-tip">点击代码中的信号，可逐处跳转</span>';
-    const positions = signalPositions(name, state.codeFile);
+    const positions = name ? signalPositions(name, state.codeFile) : [];
     const index = positions.findIndex(
       (item) => item.file === state.codeFile && item.line === Number(state.codeLine)
     );
@@ -1608,14 +1669,14 @@
       : "0/0";
     const location = index >= 0
       ? positions[index].file + ":" + positions[index].line
-      : positions.length ? "本文件 " + positions.length + " 处" : "本文件无匹配";
-    return `<div class="sig-nav" aria-label="信号位置导航">
-      <span class="sig-nav-name mono" title="${esc(name)}">${esc(name)}</span>
+      : name ? (positions.length ? "本文件 " + positions.length + " 处" : "本文件无匹配") : "点击代码中的信号";
+    return `<div class="sig-nav${name ? "" : " is-empty"}" id="sigNav" aria-label="信号位置导航">
+      <span class="sig-nav-name mono" id="sigNavName" title="${esc(name || "未选择信号")}">${esc(name || "未选择信号")}</span>
       <span class="sig-nav-scope">本文件</span>
       <button class="btn sm sig-nav-btn" id="sigPrevBtn" title="在本文件跳到上一处出现位置"${positions.length > 1 ? "" : " disabled"}>上一处</button>
       <span class="sig-nav-count mono" id="sigNavCount" aria-live="polite">${count}</span>
       <button class="btn sm sig-nav-btn" id="sigNextBtn" title="在本文件跳到下一处出现位置"${positions.length > 1 ? "" : " disabled"}>下一处</button>
-      <button class="btn sm sig-nav-btn" id="sigCopyBtn" title="复制当前位置"${state.codeFile && state.codeLine ? "" : " disabled"}>复制位置</button>
+      <button class="btn sm sig-nav-btn" id="sigCopyBtn" title="复制当前位置"${name && state.codeFile && state.codeLine ? "" : " disabled"}>复制位置</button>
       <span class="sig-nav-at" id="sigNavAt" aria-live="polite">${esc(location)}</span>
     </div>`;
   }
@@ -1701,6 +1762,78 @@
     setCrumb("代码导航 · " + file + ":" + target.line);
   }
 
+  function codeSearchMatches(query = state.codeQuery, file = state.codeFile) {
+    const needle = String(query || "").trim();
+    const info = D.files[file];
+    if (!needle || !info) return [];
+    const re = new RegExp(escapeRegExp(needle), "gi");
+    return String(info.code || "").split("\n").map((line, index) => {
+      const count = (line.match(re) || []).length;
+      return count ? { line: index + 1, count } : null;
+    }).filter(Boolean);
+  }
+
+  function paintCodeSearch() {
+    const needle = String(state.codeQuery || "").trim().toLowerCase();
+    const matches = codeSearchMatches();
+    if (!needle) {
+      state.codeSearchAt = -1;
+      state.codeSearchLine = null;
+    } else if (!matches.some((item) => item.line === state.codeSearchLine)) {
+      state.codeSearchAt = matches.length ? 0 : -1;
+      state.codeSearchLine = matches.length ? matches[0].line : null;
+    } else {
+      state.codeSearchAt = matches.findIndex((item) => item.line === state.codeSearchLine);
+    }
+    $$("#codeBody .cl").forEach((row) => {
+      row.classList.toggle("searchline", Number(row.dataset.line) === state.codeSearchLine);
+    });
+    $$("#codeBody .tk-id").forEach((token) => {
+      token.classList.toggle("hit", !!needle && token.textContent.toLowerCase().includes(needle));
+    });
+    const hits = $("#codeHits");
+    if (hits) {
+      hits.textContent = needle
+        ? `${matches.reduce((total, item) => total + item.count, 0)} 处 / ${matches.length} 行` +
+          (state.codeSearchLine ? ` · L${state.codeSearchLine}` : "")
+        : "";
+    }
+  }
+
+  function revealCodeSearch() {
+    if (!state.codeSearchLine) return;
+    centerCodeLine(state.codeSearchLine);
+    setCrumb("代码导航 · " + state.codeFile + ":" + state.codeSearchLine);
+  }
+
+  function applyCodeSearch(value) {
+    state.codeQuery = String(value || "");
+    state.codeSearchLine = null;
+    paintCodeSearch();
+    revealCodeSearch();
+    const matches = codeSearchMatches();
+    setHint(state.codeQuery.trim()
+      ? matches.length
+        ? `搜索 ${state.codeQuery.trim()} · ${matches.reduce((total, item) => total + item.count, 0)} 处 · 回车下一处`
+        : `搜索 ${state.codeQuery.trim()} · 当前文件无匹配`
+      : "点击信号名查看用途与生效条件");
+  }
+
+  function stepCodeSearch(direction) {
+    const input = $("#codeSearch");
+    if (input) state.codeQuery = input.value;
+    const matches = codeSearchMatches();
+    if (!matches.length) return paintCodeSearch();
+    let index = matches.findIndex((item) => item.line === state.codeSearchLine);
+    if (index < 0) index = direction > 0 ? -1 : 0;
+    index = (index + direction + matches.length) % matches.length;
+    state.codeSearchAt = index;
+    state.codeSearchLine = matches[index].line;
+    paintCodeSearch();
+    revealCodeSearch();
+    setHint(`搜索 ${state.codeQuery.trim()} · L${matches[index].line} · ${index + 1}/${matches.length} 行`);
+  }
+
   function renderCode() {
     const file = D.files[state.codeFile] || D.files[Object.keys(D.files)[0]];
     const lines = file.code.split("\n");
@@ -1712,6 +1845,8 @@
       <div class="code-bar">
         <label for="codeFileSelect">源码文件</label>
         <select class="search" id="codeFileSelect">${Object.keys(D.files).map((name) => `<option${name === state.codeFile ? " selected" : ""}>${esc(name)}</option>`).join("")}</select>
+        <input class="search" id="codeSearch" style="width:170px" value="${esc(state.codeQuery)}" placeholder="搜索标识符…" autocomplete="off" spellcheck="false" title="回车下一处，Shift+回车上一处" aria-label="搜索代码标识符">
+        <span class="tiny dim2" id="codeHits"></span>
         <button type="button" class="btn sm" data-code="demo_pipeline.sv" data-line="17">输入检查实例</button>
         <button type="button" class="btn sm" data-code="work_router.sv" data-line="27">状态转移</button>
         <button type="button" class="btn sm" data-code="response_stage.sv" data-line="11">响应保持</button>
@@ -1736,9 +1871,28 @@
       state.codeFile = event.target.value;
       state.codeLine = 1;
       state.codeJump = 1;
+      state.codeSearchAt = -1;
+      state.codeSearchLine = null;
       buildSidebar();
       renderCode();
     });
+    const search = $("#codeSearch");
+    if (search) {
+      search.addEventListener("input", () => {
+        clearTimeout(search._searchTimer);
+        search._searchTimer = setTimeout(() => applyCodeSearch(search.value), 140);
+      });
+      search.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          stepCodeSearch(event.shiftKey ? -1 : 1);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          search.value = "";
+          applyCodeSearch("");
+        }
+      });
+    }
     const previous = $("#sigPrevBtn");
     if (previous) previous.addEventListener("click", () => stepSignalPosition(-1));
     const next = $("#sigNextBtn");
@@ -1747,6 +1901,7 @@
     if (copy) copy.addEventListener("click", () => copyCodePosition(state.codeFile, state.codeLine));
     centerCodeLine(state.codeJump || state.codeLine);
     state.codeJump = null;
+    paintCodeSearch();
   }
 
   function renderTiming() {
@@ -1812,7 +1967,9 @@ end</pre>
     $("#inspBody").innerHTML = `
       <div class="i-title">${esc(module.name)}</div>
       <div class="i-sub">${esc(module.file)} · L${module.start}–${module.end}</div>
-      <p class="insp-summary">${esc(module.role)}</p>
+      <div class="i-sec module-role-context"><h5>模块职责</h5>
+        <p class="insp-summary">${esc(module.role)}</p>
+      </div>
       <div class="i-sec"><h5>结构</h5><table class="t insp-kv"><tbody>
         ${parent}
         <tr><td>子模块</td><td>${children.length ? children.map((item) => esc(item.name)).join("、") : "—"}</td></tr>
@@ -2229,7 +2386,19 @@ end</pre>
 
     const module = event.target.closest("[data-module]");
     if (module) {
-      inspectModule(module.dataset.module);
+      const target = moduleByName(module.dataset.module);
+      if (!target) return;
+      if (state.tab === "code" && D.files[target.file]) {
+        state.codeFile = target.file;
+        state.codeLine = target.start;
+        state.codeJump = target.start;
+        inspectModule(target.name, false);
+        renderCode();
+        buildSidebar();
+        setCrumb("代码导航 · " + target.file + ":" + target.start);
+        return;
+      }
+      inspectModule(target.name);
       if (state.tab === "overview" || state.tab === "structure") renderMain();
       return;
     }

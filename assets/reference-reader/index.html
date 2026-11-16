@@ -60,9 +60,12 @@
 </div>
 <button id="panelBackdrop" class="panel-backdrop" aria-label="关闭侧栏" tabindex="-1"></button>
 
+<div id="snippetCard" class="snippet-card" role="dialog" aria-label="信号相关片段" hidden></div>
+<div id="sourcePreview" class="source-preview" aria-live="polite" hidden></div>
+
 <footer class="statusbar">
   <div id="crumb" class="crumb">总览</div>
-  <div class="hint" id="hint">选择模块或信号查看详情</div>
+  <div class="hint" id="hint" aria-live="polite"></div>
 </footer>
 
 <script src="data.js"></script>

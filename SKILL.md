@@ -1,6 +1,6 @@
 ---
 name: rtl-reading-web
-description: "Generate or improve a Chinese RTL code-reading website from Verilog, SystemVerilog, or VHDL sources, for quickly understanding AI-generated code or unfamiliar code written by others. Use for guided module, transaction, signal, source-code, and optional waveform explanations with traceable evidence. Do not use for RTL implementation, simulation-only tasks, or a prose-only design document."
+description: "Generate or improve a Chinese RTL code-reading website from Verilog, SystemVerilog, or VHDL sources, for quickly understanding AI-generated code or unfamiliar code written by others. Use for guided module, transaction, signal, source-code with module-grouped related snippets and full-file previews, and optional waveform explanations with traceable evidence. Do not use for RTL implementation, simulation-only tasks, or a prose-only design document."
 ---
 
 # RTL 代码阅读网页
@@ -49,7 +49,7 @@ description: "Generate or improve a Chinese RTL code-reading website from Verilo
 | 左栏 | 模块树、信号索引、源码文件 | 约 `250px`；模块树体现父子关系，信号搜索覆盖全量信号，源码文件可折叠 |
 | 中央 | 当前页签的阅读内容 | 总览按“任务说明 → 3 个阅读入口 → 主结构图 → 验证记录”推进；其余页签保持相同密度和工具式布局 |
 | 右栏 | 当前模块或信号的上下文 | 约 `360px`；显示职责、端口、状态、规则和源码入口，不重复中央全文 |
-| 底栏 | 当前页签路径、交互提示 | 高约 `26px`，不承担正文说明 |
+| 底栏 | 当前页签路径、操作反馈 | 高约 `26px`，不承担正文说明，不常驻操作提醒 |
 
 默认桌面布局为 `56px` 顶栏 + `250px / minmax(0,1fr) / 360px` 三栏 + `26px` 状态栏。`1400px` 以下收为 `220px / 1fr / 330px`；`1180px` 以下右侧改成抽屉；`860px` 以下左右两栏都改为抽屉。参考页的断点、控件尺寸和滚动区域应优先复用。
 
@@ -63,6 +63,18 @@ description: "Generate or improve a Chinese RTL code-reading website from Verilo
 - 次级参数、完整端口、依据和未覆盖范围使用表格或 `details` 折叠；不得用空分区凑齐页签。
 
 交互样式也必须成套复用：“可操作”的按钮、链接和图节点共用同一套交互线索；“静态”的属性、类型和普通元数据保持中性样式。同一语义的控件不能在不同章节换成不同外观。
+
+## 相关片段与全文预览
+
+本能力扩展代码阅读证据层，不改变七页签工作台骨架、结构图、波形或验证流程。
+
+- 代码导航中选中信号后，提供“相关片段”入口；`Ctrl+单击`（macOS 为 `Cmd+单击`）信号词元可直接打开。卡片必须记住打开时的来源 `file:line`，优先显示来源模块并滚动到对应片段；片段来自当前源码快照中的真实出现行，不生成或补写不存在的代码。
+- 卡片按模块分组并优先当前模块，再按父层和其他模块排序；每个片段给出实际 `file:line`、五行上下文和行级分类（声明、赋值、例化实参、端口映射或引用）。分类只是语法提示，不能包装成形式化连接证明。
+- 单击片段跳转到对应源码行并关闭卡片；悬停片段在侧边展开**完整文件预览**，复用与主编辑器相同的语法着色，目标行居中并保持浅色标记。鼠标移入预览时保持，移出片段和预览后关闭；悬停本身不得触发跳转。
+- 卡片可点击模块页签切换；点击卡片外空白、按 `Escape` 或切换其他跳转时关闭。预览按“文件 + 信号”惰性生成并限量缓存，不能为每个信号在页面初始化时预渲染全部源码。
+- 片段过多时最多显示前 80 处并明确标注截断；完整文件预览的目标行、行号、关键字、注释、数字和信号颜色必须与主代码区一致。
+- 界面只保留对象名、模块、位置、分类和数量等必要信息；不要常驻“点击这里”“悬停预览”“来自这里”等操作提醒，交互反馈应由控件本身和结果承担。
+- 片段卡是源码位置证据，不是 AST 实网或综合网表。没有解析证据时不得把同名文本出现位置写成“真实连接”。
 
 ## 必须守住的细节
 

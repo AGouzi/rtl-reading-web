@@ -170,6 +170,19 @@
     inspect: { type: "module", id: rootModule.name }
   };
 
+  const snippetUI = {
+    open: false,
+    signal: "",
+    origin: null,
+    originGroup: 0,
+    groups: [],
+    tab: 0,
+    previewItem: null,
+    previewShowTimer: null,
+    previewHideTimer: null
+  };
+  const sourcePreviewCache = new Map();
+
   function applyStoredTheme() {
     let theme = "light";
     try {
@@ -1598,7 +1611,16 @@
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  function highlightCode(line, declaredSymbols) {
+  function highlightCode(line, declaredSymbols, options) {
+    const opts = options || {};
+    const file = opts.file || state.codeFile;
+    const interactive = opts.interactive !== false;
+    const highlighted = new Set(
+      (Array.isArray(opts.highlightSignals) ? opts.highlightSignals : [opts.highlightSignal])
+        .filter(Boolean)
+    );
+    const decorate = (word, html) =>
+      highlighted.has(word) ? `<mark class="snippet-hit">${html}</mark>` : html;
     const tokenPattern = new RegExp(
       "(\\/\\/[^\\n]*)|(\\b(?:module|endmodule|input|output|wire|reg|assign|always|posedge|negedge|begin|end|if|else|case|endcase|default|parameter|localparam)\\b)|(\\b[A-Za-z_]\\w*\\b)|(\\b\\d+(?:'[bhd])?[0-9a-fA-F_xXzZ]*\\b)",
       "g"
@@ -1612,16 +1634,20 @@
       else if (match[2]) result += `<span class="tk-kw">${esc(match[0])}</span>`;
       else if (match[3]) {
         const word = match[0];
-        if (D.signals[word]) {
+        if (D.signals[word] || (declaredSymbols && declaredSymbols.has(word))) {
+          const auto = D.signals[word] ? "" : " auto";
           const selected = state.signal === word ? " selh" : "";
-          result += `<span class="tk-id sig${selected}" role="button" tabindex="0" data-signal="${esc(word)}" data-file="${esc(state.codeFile)}">${esc(word)}</span>`;
-        } else if (constFor(word, state.codeFile)) {
-          result += `<span class="tk-id const" role="button" tabindex="0" data-const="${esc(word)}" data-file="${esc(state.codeFile)}">${esc(word)}</span>`;
-        } else if (declaredSymbols && declaredSymbols.has(word)) {
-          const selected = state.signal === word ? " selh" : "";
-          result += `<span class="tk-id sig auto${selected}" role="button" tabindex="0" data-signal="${esc(word)}" data-file="${esc(state.codeFile)}" title="由源码声明自动识别">${esc(word)}</span>`;
+          const attrs = interactive
+            ? ` role="button" tabindex="0" data-signal="${esc(word)}" data-file="${esc(file)}"${auto ? ' title="由源码声明自动识别"' : ""}`
+            : "";
+          result += `<span class="tk-id sig${auto}${selected}"${attrs}>${decorate(word, esc(word))}</span>`;
+        } else if (constFor(word, file)) {
+          const attrs = interactive
+            ? ` role="button" tabindex="0" data-const="${esc(word)}" data-file="${esc(file)}"`
+            : "";
+          result += `<span class="tk-id const"${attrs}>${decorate(word, esc(word))}</span>`;
         } else {
-          result += esc(word);
+          result += decorate(word, esc(word));
         }
       }
       else result += `<span class="tk-num">${esc(match[0])}</span>`;
@@ -1661,6 +1687,7 @@
   function signalNavHtml() {
     const name = state.signal;
     const positions = name ? signalPositions(name, state.codeFile) : [];
+    const allPositions = name ? allSignalPositions(name) : [];
     const index = positions.findIndex(
       (item) => item.file === state.codeFile && item.line === Number(state.codeLine)
     );
@@ -1677,6 +1704,7 @@
       <span class="sig-nav-count mono" id="sigNavCount" aria-live="polite">${count}</span>
       <button class="btn sm sig-nav-btn" id="sigNextBtn" title="在本文件跳到下一处出现位置"${positions.length > 1 ? "" : " disabled"}>下一处</button>
       <button class="btn sm sig-nav-btn" id="sigCopyBtn" title="复制当前位置"${name && state.codeFile && state.codeLine ? "" : " disabled"}>复制位置</button>
+      <button class="btn sm sig-nav-btn" id="sigSnippetBtn"${allPositions.length ? "" : " disabled"}>相关片段 ${allPositions.length}</button>
       <span class="sig-nav-at" id="sigNavAt" aria-live="polite">${esc(location)}</span>
     </div>`;
   }
@@ -1816,7 +1844,7 @@
       ? matches.length
         ? `搜索 ${state.codeQuery.trim()} · ${matches.reduce((total, item) => total + item.count, 0)} 处 · 回车下一处`
         : `搜索 ${state.codeQuery.trim()} · 当前文件无匹配`
-      : "点击信号名查看用途与生效条件");
+      : "");
   }
 
   function stepCodeSearch(direction) {
@@ -1834,6 +1862,336 @@
     setHint(`搜索 ${state.codeQuery.trim()} · L${matches[index].line} · ${index + 1}/${matches.length} 行`);
   }
 
+  function snippetKindForLine(text, name) {
+    const clean = String(text || "").replace(/\/\/.*$/g, "");
+    const word = "\\b" + escapeRegExp(name) + "\\b";
+    if (new RegExp(word + "\\s*(?:\\[[^\\]]+\\]\\s*)?(?:<=|=)(?!=)").test(clean)) {
+      return { key: "assign", label: "赋值" };
+    }
+    if (new RegExp("\\.\\w+\\s*\\(\\s*" + word).test(clean)) {
+      return { key: "instance", label: "例化实参" };
+    }
+    if (new RegExp("\\.\\s*" + word + "\\s*\\(").test(clean)) {
+      return { key: "instance", label: "端口映射" };
+    }
+    if (/\b(input|output|inout|wire|reg|logic|integer|bit|byte|shortint|longint|tri)\b/.test(clean)) {
+      return { key: "decl", label: "声明" };
+    }
+    return { key: "use", label: "引用" };
+  }
+
+  function moduleOrderDistance(moduleName, primaryName) {
+    let node = primaryName ? moduleByName(primaryName) : null;
+    let distance = 0;
+    while (node) {
+      if (node.name === moduleName) return distance;
+      node = node.parent ? moduleByName(node.parent) : null;
+      distance += 1;
+    }
+    const index = D.modules.findIndex((item) => item.name === moduleName);
+    return 100 + (index < 0 ? D.modules.length : index);
+  }
+
+  function snippetGroupsForSignal(name, origin) {
+    const positions = allSignalPositions(name);
+    const originOwner = origin && D.files[origin.file]
+      ? moduleAt(origin.file, Number(origin.line) || 1)
+      : null;
+    const primary = (originOwner || moduleAt(state.codeFile, state.codeLine) || {}).name ||
+      ((D.signals[name] || {}).module || "");
+    const grouped = new Map();
+    positions.slice(0, 80).forEach((position) => {
+      const info = D.files[position.file];
+      if (!info) return;
+      const lines = String(info.code || "").replace(/\r\n?/g, "\n").split("\n");
+      const text = lines[position.line - 1] || "";
+      const owner = moduleAt(position.file, position.line);
+      const moduleName = owner ? owner.name : position.file;
+      const key = moduleName;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          module: moduleName,
+          path: owner ? modulePath(owner.name).map((item) => item.name).join(" › ") : position.file,
+          items: []
+        });
+      }
+      grouped.get(key).items.push({
+        file: position.file,
+        line: position.line,
+        text,
+        origin: Boolean(origin && position.file === origin.file && position.line === Number(origin.line)),
+        kind: snippetKindForLine(text, name)
+      });
+    });
+    const groups = [...grouped.values()].sort((left, right) =>
+      moduleOrderDistance(left.module, primary) - moduleOrderDistance(right.module, primary)
+    );
+    groups.forEach((group) => {
+      group.origin = group.items.some((item) => item.origin);
+    });
+    return {
+      total: positions.length,
+      groups,
+      originGroup: groups.findIndex((group) => group.origin)
+    };
+  }
+
+  function snippetRangeHtml(item, signal) {
+    const info = D.files[item.file];
+    if (!info) return "";
+    const lines = String(info.code || "").replace(/\r\n?/g, "\n").split("\n");
+    const symbols = window.SigSem ? window.SigSem.symbols(item.file) : new Set();
+    const start = Math.max(1, item.line - 2);
+    const end = Math.min(lines.length, item.line + 2);
+    const width = Math.max(3, String(end).length);
+    return Array.from({ length: end - start + 1 }, (_, offset) => {
+      const number = start + offset;
+      const html = highlightCode(lines[number - 1] || "", symbols, {
+        file: item.file,
+        interactive: false,
+        highlightSignal: signal
+      });
+      return `<span class="snippet-line${number === item.line ? " target" : ""}"><span class="ln">${String(number).padStart(width, " ")}</span><span class="src">${html || " "}</span></span>`;
+    }).join("");
+  }
+
+  function snippetCardItemHtml(item, signal) {
+    return `<div class="snippet-item${item.origin ? " origin" : ""}" role="button" tabindex="0" data-code="${esc(item.file)}" data-line="${item.line}">
+      <div class="snippet-meta"><span class="snippet-meta-left"><span class="snippet-kind ${esc(item.kind.key)}">${esc(item.kind.label)}</span></span><span class="snippet-where">${esc(item.file)}:${item.line}</span></div>
+      <pre class="snippet-code">${snippetRangeHtml(item, signal)}</pre>
+    </div>`;
+  }
+
+  function activateSnippetTab(index) {
+    snippetUI.tab = index;
+    $$("#snippetCard [data-snippet-tab]").forEach((tab, tabIndex) => {
+      const active = tabIndex === index;
+      tab.classList.toggle("on", active);
+      tab.setAttribute("aria-selected", String(active));
+    });
+    $$("#snippetCard [data-snippet-panel]").forEach((panel, panelIndex) => {
+      panel.hidden = panelIndex !== index;
+    });
+    const body = $("#snippetCardBody");
+    if (body) body.scrollTop = 0;
+    hideSnippetPreview();
+  }
+
+  function positionSnippetCard(event) {
+    const card = $("#snippetCard");
+    if (!card || card.hidden) return;
+    requestAnimationFrame(() => {
+      const margin = 12;
+      const rect = card.getBoundingClientRect();
+      const anchorX = event && Number.isFinite(event.clientX) && event.clientX > 0
+        ? event.clientX
+        : window.innerWidth / 2;
+      const anchorY = event && Number.isFinite(event.clientY) && event.clientY > 0
+        ? event.clientY
+        : 90;
+      let left = anchorX + 16;
+      if (left + rect.width > window.innerWidth - margin) left = anchorX - rect.width - 16;
+      left = clampValue(left, margin, Math.max(margin, window.innerWidth - rect.width - margin));
+      let top = anchorY + 12;
+      if (top + rect.height > window.innerHeight - margin) top = anchorY - rect.height - 12;
+      top = clampValue(top, 64, Math.max(64, window.innerHeight - rect.height - margin));
+      card.style.left = left + "px";
+      card.style.top = top + "px";
+    });
+  }
+
+  function bindSnippetCard() {
+    $$("#snippetCard .snippet-item").forEach((item) => {
+      item.addEventListener("mouseenter", () => scheduleSnippetPreview(item));
+      item.addEventListener("mouseleave", scheduleSnippetPreviewHide);
+    });
+  }
+
+  function revealOriginSnippet() {
+    requestAnimationFrame(() => {
+      const body = $("#snippetCardBody");
+      const item = body && body.querySelector(".snippet-item.origin");
+      if (!body || !item) return;
+      const delta = item.getBoundingClientRect().top - body.getBoundingClientRect().top - 10;
+      body.scrollTop = Math.max(0, body.scrollTop + delta);
+    });
+  }
+
+  function renderSnippetCard() {
+    const card = $("#snippetCard");
+    const groups = snippetUI.groups || [];
+    if (!snippetUI.signal) return;
+    const activeIndex = groups.length
+      ? clampValue(Number(snippetUI.tab) || 0, 0, groups.length - 1)
+      : 0;
+    const summary = snippetUI.total
+      ? `${snippetUI.total} 处 · ${groups.length} 个模块${snippetUI.total > 80 ? " · 显示前 80 处" : ""}`
+      : "当前源码快照没有找到该信号的文本出现位置。";
+    if (!groups.length) {
+      card.innerHTML = `<div class="snippet-head"><div><h2>${esc(snippetUI.signal)}</h2></div><button class="snippet-close" type="button" data-close-snippet aria-label="关闭相关片段">×</button></div><div class="snippet-empty">${esc(summary)}</div>`;
+    } else {
+      card.innerHTML = `
+        <div class="snippet-head">
+          <div><h2>${esc(snippetUI.signal)}</h2></div>
+          <button class="snippet-close" type="button" data-close-snippet aria-label="关闭相关片段">×</button>
+        </div>
+        <div class="snippet-summary">${esc(summary)}</div>
+        <div class="snippet-tabs" role="tablist" aria-label="按模块查看相关片段">
+          ${groups.map((group, index) => `<button class="snippet-tab${index === activeIndex ? " on" : ""}${group.origin ? " origin" : ""}" type="button" role="tab" aria-selected="${index === activeIndex}" data-snippet-tab="${index}" title="${esc(group.path)}"><span class="n">${String(index + 1).padStart(2, "0")}</span>${esc(group.module)} <span class="dim2">${group.items.length}</span></button>`).join("")}
+        </div>
+        <div class="snippet-body" id="snippetCardBody">
+          ${groups.map((group, index) => `<section data-snippet-panel="${index}"${index !== activeIndex ? " hidden" : ""}>
+            <div class="snippet-group-title">${esc(group.path)}<span>${group.items.length} 处</span></div>
+            ${group.items.map((item) => snippetCardItemHtml(item, snippetUI.signal)).join("")}
+          </section>`).join("")}
+        </div>`;
+    }
+    card.hidden = false;
+    snippetUI.open = true;
+    snippetUI.tab = activeIndex;
+    bindSnippetCard();
+    revealOriginSnippet();
+  }
+
+  function openSignalSnippets(name, event, origin) {
+    if (!name) return;
+    const originContext = origin && D.files[origin.file]
+      ? { file: origin.file, line: Math.max(1, Number(origin.line) || 1) }
+      : null;
+    const result = snippetGroupsForSignal(name, originContext);
+    snippetUI.signal = name;
+    snippetUI.origin = originContext;
+    snippetUI.originGroup = result.originGroup;
+    snippetUI.total = result.total;
+    snippetUI.groups = result.groups;
+    snippetUI.tab = result.originGroup >= 0 ? result.originGroup : 0;
+    renderSnippetCard();
+    positionSnippetCard(event);
+  }
+
+  function closeSnippetCard() {
+    snippetUI.open = false;
+    snippetUI.signal = "";
+    snippetUI.origin = null;
+    snippetUI.originGroup = 0;
+    snippetUI.groups = [];
+    snippetUI.total = 0;
+    hideSnippetPreview();
+    const card = $("#snippetCard");
+    if (card) {
+      card.hidden = true;
+      card.innerHTML = "";
+    }
+  }
+
+  function clearSnippetPreviewTimers() {
+    clearTimeout(snippetUI.previewShowTimer);
+    clearTimeout(snippetUI.previewHideTimer);
+    snippetUI.previewShowTimer = null;
+    snippetUI.previewHideTimer = null;
+  }
+
+  function scheduleSnippetPreview(item) {
+    clearSnippetPreviewTimers();
+    snippetUI.previewShowTimer = setTimeout(() => showSnippetPreview(item), 150);
+  }
+
+  function scheduleSnippetPreviewHide() {
+    clearTimeout(snippetUI.previewShowTimer);
+    clearTimeout(snippetUI.previewHideTimer);
+    snippetUI.previewHideTimer = setTimeout(hideSnippetPreview, 220);
+  }
+
+  function hideSnippetPreview() {
+    clearSnippetPreviewTimers();
+    snippetUI.previewItem = null;
+    const preview = $("#sourcePreview");
+    if (!preview) return;
+    preview.classList.remove("visible");
+    preview.hidden = true;
+    preview.innerHTML = "";
+  }
+
+  function fullSourcePreviewHtml(file, signal) {
+    const key = file + "|" + signal;
+    if (sourcePreviewCache.has(key)) return sourcePreviewCache.get(key);
+    const info = D.files[file];
+    if (!info) return null;
+    const lines = String(info.code || "").replace(/\r\n?/g, "\n").split("\n");
+    const symbols = window.SigSem ? window.SigSem.symbols(file) : new Set();
+    const html = lines.map((line, index) => {
+      const number = index + 1;
+      return `<span class="sp-line" data-line="${number}"><span class="ln">${number}</span><span class="src">${highlightCode(line, symbols, {
+        file,
+        interactive: false,
+        highlightSignal: signal
+      }) || " "}</span></span>`;
+    }).join("");
+    const result = { html, lines, count: lines.length };
+    if (sourcePreviewCache.size >= 3) sourcePreviewCache.delete(sourcePreviewCache.keys().next().value);
+    sourcePreviewCache.set(key, result);
+    return result;
+  }
+
+  function positionSourcePreview(preview, anchor) {
+    const card = $("#snippetCard").getBoundingClientRect();
+    const margin = 12;
+    const gap = 10;
+    const maxWidth = Math.min(620, window.innerWidth - margin * 2);
+    const minReadableWidth = Math.min(380, maxWidth);
+    const rightSpace = window.innerWidth - card.right - gap - margin;
+    const leftSpace = card.left - gap - margin;
+    let width = maxWidth;
+    const height = Math.min(560, window.innerHeight - 76);
+    let left;
+    if (rightSpace >= minReadableWidth) {
+      width = Math.min(maxWidth, rightSpace);
+      left = card.right + gap;
+    } else if (leftSpace >= minReadableWidth) {
+      width = Math.min(maxWidth, leftSpace);
+      left = card.left - gap - width;
+    } else {
+      left = clampValue(window.innerWidth / 2 - width / 2, margin, window.innerWidth - width - margin);
+    }
+    const top = clampValue(anchor.top, 64, Math.max(64, window.innerHeight - height - margin));
+    preview.style.width = width + "px";
+    preview.style.height = height + "px";
+    preview.style.left = left + "px";
+    preview.style.top = top + "px";
+  }
+
+  function showSnippetPreview(item) {
+    snippetUI.previewShowTimer = null;
+    if (!item || !item.isConnected || !snippetUI.open) return;
+    const file = item.dataset.file || item.dataset.code || "";
+    const line = Number(item.dataset.line) || 1;
+    const signal = snippetUI.signal;
+    const result = fullSourcePreviewHtml(file, signal);
+    if (!result) return;
+    snippetUI.previewItem = item;
+    const preview = $("#sourcePreview");
+    preview.innerHTML = `
+      <div class="source-preview-head">
+        <div><strong>${esc(file)}</strong></div>
+        <span class="at">L${line} / ${result.count}</span>
+      </div>
+      <div class="source-preview-sub"><span>${esc(signal)}</span></div>
+      <div class="source-preview-code" id="sourcePreviewCode">${result.html}</div>`;
+    preview.hidden = false;
+    positionSourcePreview(preview, item.getBoundingClientRect());
+    preview.classList.remove("visible");
+    requestAnimationFrame(() => {
+      if (preview.hidden || snippetUI.previewItem !== item) return;
+      preview.classList.add("visible");
+      const code = $("#sourcePreviewCode");
+      const target = code && code.querySelector(`.sp-line[data-line="${line}"]`);
+      if (code && target) {
+        target.classList.add("target");
+        code.scrollTop = Math.max(0, target.offsetTop - code.clientHeight / 2 + target.offsetHeight / 2);
+      }
+    });
+  }
+
   function renderCode() {
     const file = D.files[state.codeFile] || D.files[Object.keys(D.files)[0]];
     const lines = file.code.split("\n");
@@ -1841,7 +2199,7 @@
       ? window.SigSem.symbols(state.codeFile)
       : new Set();
     $("#main").innerHTML = `
-      <div class="page-h"><div><div class="ttl">代码导航</div><div class="sub">从信号、模块或阅读入口直接定位到源码行。</div></div><span class="chip">${esc(state.codeFile)}</span></div>
+      <div class="page-h"><div><div class="ttl">代码导航</div><div class="sub">从信号、模块或源码入口定位。</div></div><span class="chip">${esc(state.codeFile)}</span></div>
       <div class="code-bar">
         <label for="codeFileSelect">源码文件</label>
         <select class="search" id="codeFileSelect">${Object.keys(D.files).map((name) => `<option${name === state.codeFile ? " selected" : ""}>${esc(name)}</option>`).join("")}</select>
@@ -1861,12 +2219,7 @@
           }).join("")}
         </div>
       </div>
-      <div class="card code-explain code-explanation" style="margin-top:12px">
-        <h4>当前入口</h4>
-        <p>${esc(file.code.split("\n")[Math.max(0, state.codeLine - 1)].trim() || "空行")}</p>
-        <div class="q">用信号详情继续</div>
-        <p>点击源码中的信号名，右侧会显示用途、声明位宽和可直接跳转的行号；选中后可用上方“上一处 / 下一处”在当前文件内逐处核对。</p>
-      </div>`;
+      `;
     $("#codeFileSelect").addEventListener("change", (event) => {
       state.codeFile = event.target.value;
       state.codeLine = 1;
@@ -1899,6 +2252,11 @@
     if (next) next.addEventListener("click", () => stepSignalPosition(1));
     const copy = $("#sigCopyBtn");
     if (copy) copy.addEventListener("click", () => copyCodePosition(state.codeFile, state.codeLine));
+    const snippets = $("#sigSnippetBtn");
+    if (snippets) snippets.addEventListener("click", (event) => openSignalSnippets(state.signal, event, {
+      file: state.codeFile,
+      line: state.codeLine
+    }));
     centerCodeLine(state.codeJump || state.codeLine);
     state.codeJump = null;
     paintCodeSearch();
@@ -2254,16 +2612,6 @@ end</pre>
     const focus = moduleByName(state.focus);
     const label = TABS.find(([id]) => id === state.tab)?.[1] || "总览";
     setCrumb(state.tab === "structure" && focus ? `${label} / ${focus.name}` : label);
-    const hints = {
-      overview: "选择模块、信号或连线查看上下文",
-      structure: "单击模块进入内部；单击连线查看信号与依据",
-      dataflow: "单击步骤查看条件、模块和源码",
-      control: "单击状态查看转移条件",
-      code: "点击信号名查看用途与生效条件",
-      timing: D.wave ? "勾选信号、切换场景；拖拽或输入时间移动游标" : "波形只在有真实数据时展示",
-      verify: "验证记录只来自可读报告"
-    };
-    setHint(hints[state.tab] || "选择模块、信号或源码入口查看上下文");
     refreshInspector();
   }
 
@@ -2341,6 +2689,7 @@ end</pre>
 
   function openCode(file, line) {
     if (!D.files[file]) return;
+    closeSnippetCard();
     if (!state.inspect || state.inspect.type !== "signal") state.signal = null;
     state.codeFile = file;
     state.codeLine = Math.max(1, Number(line) || 1);
@@ -2349,6 +2698,27 @@ end</pre>
   }
 
   document.addEventListener("click", (event) => {
+    const snippetClose = event.target.closest("[data-close-snippet]");
+    if (snippetClose) {
+      event.preventDefault();
+      return closeSnippetCard();
+    }
+
+    const snippetTab = event.target.closest("[data-snippet-tab]");
+    if (snippetTab) {
+      event.preventDefault();
+      return activateSnippetTab(Number(snippetTab.dataset.snippetTab));
+    }
+
+    if (
+      snippetUI.open &&
+      !event.target.closest("#snippetCard") &&
+      !event.target.closest("#sourcePreview") &&
+      !event.target.closest("#sigSnippetBtn")
+    ) {
+      closeSnippetCard();
+    }
+
     const tab = event.target.closest("[data-tab]");
     if (tab) return go(tab.dataset.tab);
 
@@ -2418,9 +2788,21 @@ end</pre>
       const previousModule = state.module;
       const row = signal.closest("[data-line]");
       const originFile = signal.dataset.file || (row ? state.codeFile : "");
+      const originLine = Number(row ? row.dataset.line : state.codeLine) || 1;
       if (state.tab === "code" && row) {
         state.codeLine = Number(row.dataset.line);
         state.codeJump = state.codeLine;
+      }
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        inspectSignal(signal.dataset.signal, false, originFile);
+        if (state.tab === "code") renderCode();
+        else renderMain();
+        openSignalSnippets(signal.dataset.signal, event, {
+          file: originFile || state.codeFile,
+          line: originLine
+        });
+        return;
       }
       inspectSignal(signal.dataset.signal, state.tab !== "code", originFile);
       if (state.tab === "code") renderCode();
@@ -2474,8 +2856,22 @@ end</pre>
       event.preventDefault();
       control.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     }
-    if (event.key === "Escape") closePanels();
+    if (event.key === "Escape") {
+      if (snippetUI.open) {
+        closeSnippetCard();
+        return;
+      }
+      closePanels();
+    }
   });
+
+  window.addEventListener("resize", hideSnippetPreview);
+  document.addEventListener("scroll", (event) => {
+    if (event.target && event.target.closest && event.target.closest("#sourcePreview")) return;
+    hideSnippetPreview();
+  }, true);
+  $("#sourcePreview").addEventListener("mouseenter", clearSnippetPreviewTimers);
+  $("#sourcePreview").addEventListener("mouseleave", scheduleSnippetPreviewHide);
 
   $("#sigSearch").addEventListener("input", (event) => paintSidebarList(event.target.value));
   $("#themeBtn").addEventListener("click", toggleTheme);

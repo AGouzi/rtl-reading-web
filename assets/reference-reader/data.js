@@ -1,10 +1,18 @@
-window.DEMO = {
+window.RTL_READING_DATA = {
   meta: {
     title: "demo_pipeline",
+    brand: "DP",
     subtitle: "输入帧 → 路由处理 → 响应帧",
+    headline: "输入帧 → 路由处理 → 响应帧",
+    lead: "全部 RTL、信号和验证记录均为虚构示例。示例聚焦一笔请求怎样经过字段检查、任务路由、响应生成和状态计数。",
     clock: "125 MHz",
     reset: "rst_n，异步低有效",
-    note: "全部 RTL、信号和验证记录均为虚构示例"
+    note: "全部 RTL、信号和验证记录均为虚构示例",
+    moduleBadge: "虚构示例",
+    validationLabel: "示例验证",
+    validationSource: "虚构示例",
+    legendNote: "clk/rst_n 广播，不逐条绘制",
+    sourceNote: "此页仅演示 RTL 阅读页面的结构、视觉和交互。模块、源码、信号、测试计数均为虚构内容，不来自任何产品。"
   },
 
   portGroups: {
@@ -948,8 +956,8 @@ endmodule`
   wave: {
     source: {
       script: "wave-demo.js",
-      global: "DEMO_WAVE_VCD",
-      metaGlobal: "DEMO_WAVE_META"
+      global: "REF_WAVE_VCD",
+      metaGlobal: "REF_WAVE_META"
     },
     groups: [
       {

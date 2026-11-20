@@ -1,7 +1,36 @@
 (function () {
   "use strict";
 
-  const D = window.DEMO;
+  const D = window.RTLReaderData
+    ? window.RTLReaderData.resolve()
+    : window.RTL_READING_DATA;
+  if (!D) {
+    const detail = window.RTLReaderData && window.RTLReaderData.errorMessage
+      ? window.RTLReaderData.errorMessage()
+      : "";
+    if (window.RTLReaderData && window.RTLReaderData.fail) {
+      window.RTLReaderData.fail(detail || "未找到包含 modules 和 files 的 RTL 阅读数据。");
+    } else {
+      document.getElementById("main").innerHTML =
+        '<div class="boot-error" role="alert"><h1>页面数据未加载</h1><p>请确认 data.js 在 app.js 之前加载，并导出 window.RTL_READING_DATA。</p></div>';
+    }
+    return;
+  }
+  D.meta = D.meta || {};
+  D.signals = D.signals || {};
+  D.portGroups = D.portGroups || {};
+  D.externals = D.externals || {};
+  D.edges = D.edges || [];
+  D.layout = D.layout || {};
+  D.scenarios = D.scenarios || {};
+  D.files = D.files || {};
+  if (!Array.isArray(D.modules) || !D.modules.length) {
+    if (window.RTLReaderData && window.RTLReaderData.fail) {
+      window.RTLReaderData.fail("data.modules 必须是非空数组。");
+    }
+    return;
+  }
+
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
   const esc = (value) => String(value).replace(/[&<>"']/g, (ch) => ({
@@ -25,7 +54,16 @@
     ? location.hash.replace(/^#\/?/, "")
     : "overview";
 
-  const rootModule = D.modules.find((item) => !item.parent) || D.modules[0];
+  const configuredDefaults = D.defaults || {};
+  const rootModule = D.modules.find((item) => item.name === configuredDefaults.module) ||
+    D.modules.find((item) => !item.parent) ||
+    D.modules[0];
+  if (!rootModule || !rootModule.name) {
+    if (window.RTLReaderData && window.RTLReaderData.fail) {
+      window.RTLReaderData.fail("data.modules 中没有带 name 的可用模块。");
+    }
+    return;
+  }
   const moduleByName = (name) => D.modules.find((item) => item.name === name);
   const moduleAt = (file, line) =>
     D.modules.find(
@@ -33,6 +71,22 @@
     ) || null;
   const childrenOf = (name) => D.modules.filter((item) => item.parent === name);
   const signalNames = Object.keys(D.signals);
+  const defaultSignal = D.signals[configuredDefaults.signal]
+    ? configuredDefaults.signal
+    : signalNames.find((name) => {
+      const signal = D.signals[name] || {};
+      return signal.module === rootModule.name;
+    }) || signalNames[0] || null;
+  const defaultScenario = D.scenarios[configuredDefaults.scenario]
+    ? configuredDefaults.scenario
+    : Object.keys(D.scenarios)[0] || null;
+  const defaultFsmState = configuredDefaults.fsmState || (
+    D.fsm && D.fsm.states && D.fsm.states.length ? D.fsm.states[0].id : null
+  );
+  const defaultCodeFile = D.files[configuredDefaults.file]
+    ? configuredDefaults.file
+    : rootModule.file || Object.keys(D.files)[0] || "";
+  const defaultCodeLine = Number(configuredDefaults.line) || Number(rootModule.start) || 1;
   const internalEdges = D.modules.flatMap((module) =>
     ((module.internal && module.internal.edges) || []).map((edge) => ({
       ...edge,
@@ -40,7 +94,9 @@
       module: module.name
     }))
   );
+  const projectedEdges = new Map();
   const edgeById = (id) =>
+    projectedEdges.get(id) ||
     D.edges.find((item) => item.id === id) ||
     internalEdges.find((item) => item.id === id);
   const kindLabels = { data: "数据", control: "控制", error: "错误", clock: "时钟/复位" };
@@ -151,16 +207,16 @@
     tab: initialTab,
     module: rootModule.name,
     focus: rootModule.name,
-    signal: "req_valid",
+    signal: defaultSignal,
     constant: null,
     constantFile: null,
     edge: null,
-    state: "IDLE",
+    state: defaultFsmState,
     step: 0,
-    scenario: "request",
-    codeFile: "demo_pipeline.sv",
-    codeLine: 17,
-    codeJump: 17,
+    scenario: defaultScenario,
+    codeFile: defaultCodeFile,
+    codeLine: defaultCodeLine,
+    codeJump: defaultCodeLine,
     codeQuery: "",
     codeSearchLine: null,
     codeSearchAt: -1,
@@ -186,10 +242,26 @@
   function applyStoredTheme() {
     let theme = "light";
     try {
-      theme = localStorage.getItem("demo-reader-theme") || "light";
+      theme = localStorage.getItem("rtl-reader-theme") || "light";
     } catch (_) {}
     document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light";
     $("#themeBtn").textContent = theme === "dark" ? "浅色" : "深色";
+  }
+
+  function applyBrand() {
+    const meta = D.meta || {};
+    const title = meta.title || rootModule.label || rootModule.name || "RTL";
+    document.title = title + " · RTL 阅读工作台";
+    const logoText = String(meta.brand || title)
+      .replace(/[^\p{L}\p{N}]/gu, "")
+      .slice(0, 3)
+      .toUpperCase() || "RTL";
+    const logo = document.querySelector(".brand .logo");
+    const name = document.querySelector(".brand .t1");
+    const subtitle = document.querySelector(".brand .t2");
+    if (logo) logo.textContent = logoText;
+    if (name) name.textContent = title;
+    if (subtitle) subtitle.textContent = meta.descriptor || "RTL 阅读工作台";
   }
 
   function toggleTheme() {
@@ -198,7 +270,7 @@
     $("#themeBtn").textContent = next === "dark" ? "浅色" : "深色";
     if (window.WaveUI) WaveUI.redraw();
     try {
-      localStorage.setItem("demo-reader-theme", next);
+      localStorage.setItem("rtl-reader-theme", next);
     } catch (_) {}
   }
 
@@ -274,7 +346,8 @@
   function paintSidebarList(query) {
     const q = String(query || "").trim().toLowerCase();
     const signals = signalNames
-      .filter((name) => !q || name.toLowerCase().includes(q) || D.signals[name].purpose.toLowerCase().includes(q))
+      .filter((name) => !q || name.toLowerCase().includes(q) ||
+        String(D.signals[name].purpose || "").toLowerCase().includes(q))
       .slice(0, 120)
       .map((name) => {
         const sig = D.signals[name];
@@ -412,30 +485,129 @@
     return positions;
   }
 
+  function scopeFor(name, focusName) {
+    let current = moduleByName(name);
+    let guard = 0;
+    while (current && current.parent && guard < 128) {
+      if (current.parent === focusName) return current.name;
+      current = moduleByName(current.parent);
+      guard += 1;
+    }
+    return null;
+  }
+
+  function visibleScope(name, focusName) {
+    if (!name) return null;
+    const focus = moduleByName(focusName) || rootModule;
+    if (name === focus.name) return focus.parent ? name : null;
+    const module = moduleByName(name);
+    if (module) return scopeFor(name, focusName) || name;
+    return D.externals[name] ? name : null;
+  }
+
+  function scopeHighlight(highlight, focusName) {
+    if (!highlight) return highlight;
+    const mapped = new Set();
+    for (const name of highlight) {
+      const scope = visibleScope(name, focusName);
+      if (scope) mapped.add(scope);
+    }
+    return mapped;
+  }
+
   function diagramNodes(focusName) {
     const focus = moduleByName(focusName) || rootModule;
+    const focusHasParent = Boolean(focus.parent);
+    projectedEdges.clear();
     const children = childrenOf(focus.name);
-    const ids = new Set(children.map((item) => item.name));
     const nodes = children.map((item) => ({
       id: item.name,
       label: item.label,
       caption: item.name,
       external: false
     }));
-    for (const [id, external] of Object.entries(D.externals)) {
-      const connected = D.edges.some((edge) =>
-        (edge.from === id && ids.has(edge.to)) || (edge.to === id && ids.has(edge.from))
-      );
-      if (connected) nodes.push({ id, label: external.label, caption: external.caption, external: true });
-    }
     const visibleIds = new Set(nodes.map((node) => node.id));
-    const edges = D.edges.filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to));
+    const edges = [];
+
+    const addExternal = (id) => {
+      if (!D.externals[id] || visibleIds.has(id)) return;
+      visibleIds.add(id);
+      nodes.push({
+        id,
+        label: D.externals[id].label,
+        caption: D.externals[id].caption,
+        external: true
+      });
+    };
+
+    const ensureBoundary = (id) => {
+      if (visibleIds.has(id)) return;
+      const module = moduleByName(id);
+      if (!module) return;
+      visibleIds.add(id);
+      nodes.push({
+        id,
+        label: module.label || module.name,
+        caption: id === focus.name ? "本模块边界" : "外部模块 · " + module.name,
+        external: true,
+        boundary: true,
+        focusBoundary: id === focus.name
+      });
+    };
+
+    const strictChildScope = (name) => Boolean(scopeFor(name, focus.name));
+    const isFocus = (name) => name === focus.name && focusHasParent;
+    const isRelevant = (name) => strictChildScope(name) || isFocus(name);
+
+    for (const edge of D.edges) {
+      if (!edge || !edge.from || !edge.to) continue;
+      if (!isRelevant(edge.from) && !isRelevant(edge.to)) continue;
+      const fromModule = moduleByName(edge.from);
+      const toModule = moduleByName(edge.to);
+      const fromBoundary = Boolean(fromModule) &&
+        !strictChildScope(edge.from) &&
+        (edge.from !== focus.name || focusHasParent);
+      const toBoundary = Boolean(toModule) &&
+        !strictChildScope(edge.to) &&
+        (edge.to !== focus.name || focusHasParent);
+      const fromScope = fromModule
+        ? (scopeFor(edge.from, focus.name) || edge.from)
+        : (D.externals[edge.from] ? edge.from : null);
+      const toScope = toModule
+        ? (scopeFor(edge.to, focus.name) || edge.to)
+        : (D.externals[edge.to] ? edge.to : null);
+      if (!fromScope || !toScope || fromScope === toScope) continue;
+      const fromVisible = visibleIds.has(fromScope) ||
+        Boolean(D.externals[fromScope]) ||
+        (fromBoundary && Boolean(moduleByName(fromScope)));
+      const toVisible = visibleIds.has(toScope) ||
+        Boolean(D.externals[toScope]) ||
+        (toBoundary && Boolean(moduleByName(toScope)));
+      if (!fromVisible || !toVisible) continue;
+      if (fromBoundary) ensureBoundary(fromScope);
+      else addExternal(fromScope);
+      if (toBoundary) ensureBoundary(toScope);
+      else addExternal(toScope);
+      const projected = {
+        ...edge,
+        from: fromScope,
+        to: toScope,
+        originalFrom: edge.from,
+        originalTo: edge.to,
+        aggregated: fromScope !== edge.from || toScope !== edge.to,
+        boundary: fromBoundary || toBoundary
+      };
+      projectedEdges.set(edge.id, projected);
+      edges.push(projected);
+    }
+
     return { focus, nodes, edges };
   }
 
   function layoutFor(nodes, edges) {
     const positions = new Map();
     for (const node of nodes) {
+      if (node.boundary) continue;
       if (D.layout[node.id]) positions.set(node.id, D.layout[node.id]);
     }
     const missing = nodes.filter((node) => !positions.has(node.id));
@@ -877,7 +1049,10 @@
     const width = layout.labelWidth;
     const labelX = layout.labelX;
     const labelY = layout.labelY;
-    return `<g class="edge${state.edge === edge.id ? " sel" : ""}" data-edge="${edge.id}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}" role="button" tabindex="0" aria-label="${esc(edge.from)} 到 ${esc(edge.to)}，${esc(label)}">
+    const actualFrom = edge.originalFrom || edge.from;
+    const actualTo = edge.originalTo || edge.to;
+    const across = edge.aggregated ? "（图中聚合到可见模块）" : "";
+    return `<g class="edge${state.edge === edge.id ? " sel" : ""}" data-edge="${edge.id}" data-from="${esc(actualFrom)}" data-to="${esc(actualTo)}" role="button" tabindex="0" aria-label="${esc(actualFrom)} 到 ${esc(actualTo)}${across}，${esc(label)}">
       ${layout.leaderD ? `<path class="edge-leader" d="${layout.leaderD}"></path>` : ""}
       <path class="edge-hit" d="${layout.d}"></path>
       <path class="${wireClass}" d="${layout.d}" marker-end="url(#arrow-${kind})"></path>
@@ -891,7 +1066,8 @@
   function nodeSvg(node, position, selected, highlight) {
     const { x, y, w, h } = position;
     if (node.external) {
-      return `<g class="ext" data-node-id="${esc(node.id)}" transform="translate(${x} ${y})">
+      const classes = `ext${selected === node.id ? " sel" : ""}${highlight && highlight.has(node.id) ? " hl" : ""}${node.boundary ? " boundary" : ""}${node.focusBoundary ? " focus-boundary" : ""}`;
+      return `<g class="${classes}" data-node-id="${esc(node.id)}" transform="translate(${x} ${y})">
         <rect width="${w}" height="${h}" rx="6"></rect>
         <text x="${w / 2}" y="25" text-anchor="middle">${esc(node.label)}</text>
         <text class="sub" x="${w / 2}" y="43" text-anchor="middle">${esc(node.caption)}</text>
@@ -918,7 +1094,20 @@
     const height = maxY + 52;
     const layouts = layoutEdges(model.edges, positions);
     const edges = model.edges.map((edge) => edgeSvg(edge, layouts.get(edge.id))).join("");
-    const nodes = model.nodes.map((node) => nodeSvg(node, positions.get(node.id), selected, highlight)).join("");
+    const selectedScope = visibleScope(selected, focus.name);
+    const highlightScope = scopeHighlight(highlight, focus.name);
+    const nodes = model.nodes.map((node) => nodeSvg(node, positions.get(node.id), selectedScope, highlightScope)).join("");
+    const aggregated = model.edges.some((edge) => edge.aggregated);
+    const boundary = model.edges.some((edge) => edge.boundary);
+    const note = !model.edges.length
+      ? "当前层没有跨模块连线；单击模块进入内部查看连接"
+      : boundary && aggregated
+        ? "单击模块进入内部；跨层/跨边界连线已标出，单击连线查看真实端点"
+        : boundary
+          ? "单击模块进入内部；跨边界连线已标出，单击连线查看真实端点"
+          : aggregated
+            ? "单击模块进入内部；单击连线查看真实端点与依据 · 跨层连线已聚合到可见模块"
+            : "单击模块进入内部；单击连线查看真实信号与源码依据";
     return `<svg viewBox="0 0 ${width} ${height}" role="group" aria-label="${esc(focus.name)} 的子模块连接图">
       <defs>
         <marker id="arrow-data" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="mk" d="M0,0 L8,4 L0,8 z"></path></marker>
@@ -926,7 +1115,7 @@
         <marker id="arrow-error" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="mk e" d="M0,0 L8,4 L0,8 z"></path></marker>
         <marker id="arrow-clock" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="mk d" d="M0,0 L8,4 L0,8 z"></path></marker>
       </defs>
-      <text class="dnote" x="16" y="${height - 14}">单击模块进入内部；单击连线查看真实信号与源码依据</text>
+      <text class="dnote" x="16" y="${height - 14}">${note}</text>
       ${edges}
       ${nodes}
     </svg>`;
@@ -934,6 +1123,7 @@
 
   function diagramCard(title, subtitle, selected, focusName, highlight) {
     const focus = moduleByName(focusName) || rootModule;
+    const meta = D.meta || {};
     return `<article class="card overview-map">
       <div class="diagram-head">
         <h3>${esc(title)} <span class="section-meta">${esc(subtitle)}</span></h3>
@@ -941,43 +1131,68 @@
       </div>
       <div class="diagram-crumb">${modulePathHtml(focus.name)}</div>
       <div class="diagram">${diagramSvg(selected, focus.name, highlight)}</div>
-      <div class="legend"><span><i></i>数据</span><span><i class="d"></i>控制</span><span><i class="e"></i>错误</span><span class="legend-note">clk/rst_n 广播，不逐条绘制</span></div>
+      <div class="legend"><span><i></i>数据</span><span><i class="d"></i>控制</span><span><i class="e"></i>错误</span>${meta.legendNote ? `<span class="legend-note">${esc(meta.legendNote)}</span>` : ""}</div>
     </article>`;
   }
 
   function pathButton(number, title, detail, target, signal) {
-    return `<button type="button" class="path" data-go="${target}"${signal ? ` data-signal="${signal}"` : ""}>
+    return `<button type="button" class="path" data-go="${esc(target)}"${signal ? ` data-signal="${esc(signal)}"` : ""}>
       <span class="n">${number}</span>
-      <span class="path-copy"><span class="t">${title}</span><span class="d">${detail}</span></span>
+      <span class="path-copy"><span class="t">${esc(title)}</span><span class="d">${esc(detail)}</span></span>
       <span class="path-arrow">→</span>
     </button>`;
   }
 
   function renderOverview() {
+    const meta = D.meta || {};
+    const headline = meta.headline || meta.subtitle || meta.title || rootModule.label || rootModule.name || "RTL 阅读";
+    const lead = meta.lead || meta.note || "";
+    const firstScenario = defaultScenario ? D.scenarios[defaultScenario] : null;
+    const firstStep = firstScenario && firstScenario.steps && firstScenario.steps[0];
+    const flowSignal = (firstStep && firstStep.signals && firstStep.signals[0]) || defaultSignal;
+    const readingPath = Array.isArray(D.readingPath) && D.readingPath.length
+      ? D.readingPath.slice(0, 3)
+      : [
+        { title: "看结构", detail: "先了解模块职责与接口", target: "structure", signal: defaultSignal },
+        { title: "跟事务", detail: "再跟踪一笔真实事务", target: "dataflow", signal: flowSignal },
+        { title: "读代码", detail: "定位实现与信号", target: "code", signal: defaultSignal }
+      ];
+    const summary = D.validation && D.validation.summary;
+    const hasDiagram = childrenOf(rootModule.name).length > 0;
     $("#main").innerHTML = `
       <section class="hero">
-        <h1>输入帧 → 路由处理 → 响应帧</h1>
-        <p class="lead">${esc(D.meta.note)}。示例聚焦一笔请求怎样经过字段检查、任务路由、响应生成和状态计数。</p>
+        <h1>${esc(headline)}</h1>
+        ${lead ? `<p class="lead">${esc(lead)}</p>` : ""}
       </section>
       <section aria-label="建议阅读顺序">
         <h3 class="tiny dim2" style="margin:0 0 7px">建议阅读顺序</h3>
         <div class="reading-path">
-          ${pathButton("01", "看模块", "先了解职责与接口", "structure", "req_valid")}
-          ${pathButton("02", "跟请求", "再跟踪一笔请求", "dataflow", "work_done")}
-          ${pathButton("03", "读代码", "定位实现与信号", "code", "resp_valid")}
+          ${readingPath.map((item, index) =>
+            pathButton(
+              String(index + 1).padStart(2, "0"),
+              item.title || "继续阅读",
+              item.detail || "",
+              item.target || "overview",
+              item.signal || ""
+            )
+          ).join("")}
         </div>
       </section>
-      ${diagramCard("请求如何经过各模块", "单时钟域 · 单击模块进入内部", state.module, rootModule.name, null)}
-      <div class="overview-followup">
-        <span>示例检查：${D.validation.summary.cases} 个场景 · ${D.validation.summary.checks} 次断言</span>
+      ${hasDiagram ? diagramCard(
+        meta.diagramTitle || "结构与连接",
+        "单击模块进入内部；单击连线查看真实端点与依据",
+        state.module,
+        rootModule.name,
+        null
+      ) : ""}
+      ${summary ? `<div class="overview-followup">
+        <span>${esc(meta.validationLabel || "验证记录")}：${summary.cases || 0} 个场景 · ${summary.checks || 0} 次断言</span>
         <button type="button" class="btn sm" data-go="verify">查看验证范围 →</button>
-      </div>
-      <details class="card fold-card">
-        <summary>模板说明与资料来源</summary>
-        <div class="fold-content">
-          <p>此页仅演示 RTL 阅读页面的结构、视觉和交互。模块、源码、信号、测试计数均为虚构内容，不来自任何产品。</p>
-        </div>
-      </details>`;
+      </div>` : ""}
+      ${meta.sourceNote ? `<details class="card fold-card">
+        <summary>资料来源与边界</summary>
+        <div class="fold-content"><p>${esc(meta.sourceNote)}</p></div>
+      </details>` : ""}`;
   }
 
   function groupedPorts(module) {
@@ -1013,7 +1228,7 @@
   function portGroupHtml(module, openFirst = false) {
     const groups = groupedPorts(module);
     const order = groupOrder(groups);
-    const openKey = openFirst ? (order.find((key) => key !== "clock_reset") || order[0]) : "";
+    const openKey = openFirst ? order[0] : "";
     return order.map((key) => `<details class="port-group"${openKey === key ? " open" : ""}>
       <summary>${esc(D.portGroups[key] || key)} <span>${groups[key].length} 个</span></summary>
       <div class="port-group-b">${groups[key].map(portLine).join("")}</div>
@@ -1254,7 +1469,7 @@
     const children = childrenOf(focus.name);
     const head = `<div class="page-h">
       <div><div class="ttl">模块结构</div><div class="sub">先看职责与接口，再进入具体信号。</div></div>
-      <span class="chip">${D.modules.length} 个模块 · 虚构示例</span>
+      <span class="chip">${D.modules.length} 个模块${D.meta.moduleBadge ? ` · ${esc(D.meta.moduleBadge)}` : ""}</span>
     </div>`;
     if (!children.length) {
       $("#main").innerHTML = `${head}${moduleRoleCard(focus)}${moduleDetailHtml(focus)}`;
@@ -1265,7 +1480,7 @@
     ).join("");
     $("#main").innerHTML = `${head}
       ${moduleRoleCard(focus)}
-      ${diagramCard("模块与连接关系", "单击模块进入内部；单击连线查看信号与依据", state.module, focus.name, null)}
+      ${diagramCard(D.meta.structureTitle || "模块与连接关系", "单击模块进入内部；单击连线查看真实端点与依据", state.module, focus.name, null)}
       <details class="card fold-card" style="margin-top:12px">
         <summary>子模块职责 <span class="section-meta">${children.length} 个</span></summary>
       <div class="fold-content"><table class="t"><thead><tr><th>模块</th><th>标签</th><th>职责</th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -1273,15 +1488,17 @@
   }
 
   function currentStep() {
-    const scenario = D.scenarios[state.scenario] || D.scenarios.request;
+    const scenario = D.scenarios[state.scenario] || D.scenarios[Object.keys(D.scenarios)[0]];
+    if (!scenario || !scenario.steps || !scenario.steps.length) return null;
     return scenario.steps[state.step] || scenario.steps[0];
   }
 
   function pipelineNodes() {
     const scenario = D.scenarios[state.scenario];
+    if (!scenario || !scenario.steps) return "";
     return scenario.steps.map((step, index) =>
       `${index ? '<span class="parrow">→</span>' : ""}<button type="button" class="pnode${state.step === index ? " on" : ""}" data-step="${index}">
-        <div class="ph">${esc(step.phase)}</div><div class="pt">${esc(step.condition)}</div><div class="pd">${esc(step.action)}</div>
+        <div class="ph">${esc(step.phase || "—")}</div><div class="pt">${esc(step.condition || "—")}</div><div class="pd">${esc(step.action || "—")}</div>
       </button>`
     ).join("");
   }
@@ -1306,41 +1523,56 @@
   }
 
   function renderDataflow() {
-    const scenario = D.scenarios[state.scenario] || D.scenarios.request;
-    const step = currentStep();
+    const entries = Object.entries(D.scenarios);
+    if (!entries.length) {
+      $("#main").innerHTML = `
+        <div class="page-h"><div><div class="ttl">数据流</div><div class="sub">从入口到出口跟踪一笔真实事务。</div></div><span class="chip">无事务数据</span></div>
+        <article class="card"><h3>当前快照没有可追溯的事务步骤</h3><p class="small muted">补充场景、步骤和源码依据后，本页再展示路径；不生成示例流程。</p></article>`;
+      return;
+    }
+    const scenarioKey = D.scenarios[state.scenario] ? state.scenario : entries[0][0];
+    const scenario = D.scenarios[scenarioKey];
+    const steps = scenario.steps || [];
+    if (state.scenario !== scenarioKey) state.scenario = scenarioKey;
+    if (state.step >= steps.length) state.step = 0;
+    const step = currentStep() || { modules: [], signals: [], edge: null, code: null };
+    const stepCode = step.code && step.code.file
+      ? `<button type="button" class="btn sm" data-code="${esc(step.code.file)}" data-line="${Number(step.code.line) || 1}">定位源码 →</button>`
+      : "";
+    const stepTable = steps.length
+      ? `<details class="card fold-card" style="margin-top:12px">
+        <summary>步骤条件汇总 <span class="section-meta">${steps.length} 条</span></summary>
+        <div class="fold-content"><table class="t"><thead><tr><th>阶段</th><th>条件</th><th>动作</th></tr></thead><tbody>
+          ${steps.map((item) => `<tr><td>${esc(item.phase || "—")}</td><td class="mono">${esc(item.condition || "—")}</td><td>${esc(item.action || "—")}</td></tr>`).join("")}
+        </tbody></table></div>
+      </details>`
+      : "";
     $("#main").innerHTML = `
-      <div class="page-h"><div><div class="ttl">数据流</div><div class="sub">一笔请求在两个握手之间怎样推进。</div></div><span class="chip">${esc(scenario.title)}</span></div>
+      <div class="page-h"><div><div class="ttl">数据流</div><div class="sub">一笔事务在两个握手之间怎样推进。</div></div><span class="chip">${esc(scenario.title || scenarioKey)}</span></div>
       <article class="card">
         <div class="row" style="margin-bottom:10px">
-          ${Object.entries(D.scenarios).map(([key, value]) => `<button type="button" class="btn sm${state.scenario === key ? " on" : ""}" data-scenario="${key}">${esc(value.title)}</button>`).join("")}
+          ${entries.map(([key, value]) => `<button type="button" class="btn sm${state.scenario === key ? " on" : ""}" data-scenario="${key}">${esc(value.title || key)}</button>`).join("")}
         </div>
         <div class="pipe">${pipelineNodes()}</div>
-        <div class="note">${esc(scenario.note)}</div>
+        ${scenario.note ? `<div class="note">${esc(scenario.note)}</div>` : ""}
       </article>
       <article class="card step-map" style="margin-top:12px">
         <h3>高亮路径 <span class="section-meta">当前步骤涉及的模块</span></h3>
-        <div class="diagram">${diagramSvg(null, rootModule.name, new Set(step.modules))}</div>
+        <div class="diagram">${diagramSvg(null, rootModule.name, new Set(step.modules || []))}</div>
       </article>
       <article class="card step-card" style="margin-top:12px">
-        <div class="step-head"><h3>本步引用</h3><span class="chip">步骤 ${state.step + 1}/${scenario.steps.length}</span></div>
+        <div class="step-head"><h3>本步引用</h3><span class="chip">步骤 ${state.step + 1}/${steps.length}</span></div>
         <div class="step-grid">
-          <div><h5>涉及模块</h5><div class="row">${moduleChips(step.modules)}</div></div>
-          <div><h5>关键信号</h5><div class="row">${signalChips(step.signals)}</div></div>
+          <div><h5>涉及模块</h5><div class="row">${moduleChips(step.modules || [])}</div></div>
+          <div><h5>关键信号</h5><div class="row">${signalChips(step.signals || [])}</div></div>
           <div><h5>对应连线</h5><div class="row">${edgeChip(step.edge)}</div></div>
         </div>
         <div class="i-actions">
-          <button type="button" class="btn sm" data-code="${esc(step.code.file)}" data-line="${step.code.line}">定位源码 →</button>
+          ${stepCode}
           ${step.edge ? `<button type="button" class="btn sm" data-edge-select="${step.edge}">查看连线依据</button>` : ""}
         </div>
       </article>
-      <details class="card fold-card" style="margin-top:12px">
-        <summary>握手条件汇总 <span class="section-meta">3 条</span></summary>
-        <div class="fold-content"><table class="t"><thead><tr><th>阶段</th><th>条件</th><th>下一状态</th></tr></thead><tbody>
-          <tr><td>接收</td><td class="mono">req_valid && req_ready</td><td>检查请求类型</td></tr>
-          <tr><td>执行</td><td class="mono">work_valid && work_ready</td><td>等待 work_done</td></tr>
-          <tr><td>响应</td><td class="mono">resp_valid && resp_ready</td><td>释放当前请求</td></tr>
-        </tbody></table></div>
-      </details>`;
+      ${stepTable}`;
   }
 
   const FSM_NORMAL = { l: [-1, 0], r: [1, 0], t: [0, -1], b: [0, 1] };
@@ -1581,30 +1813,40 @@
   }
 
   function renderControl() {
-    const fsmCard = D.fsm
+    const scenarioCards = Object.entries(D.scenarios).slice(0, 9).map(([key, scenario]) =>
+      `<article class="card">
+        <h3>${esc(scenario.title || key)}</h3>
+        <p class="small muted">${esc(scenario.note || "查看该场景的条件与步骤。")}</p>
+        <button type="button" class="btn sm" data-go="dataflow" data-scenario="${esc(key)}">查看步骤 →</button>
+      </article>`
+    ).join("");
+    const fsm = D.fsm;
+    const fsmCard = fsm
       ? `<article class="card" style="margin-top:12px">
-          <h3>${esc(D.fsm.name)} 状态机 <span class="section-meta">${esc(D.fsm.file)}</span></h3>
+          <h3>${esc(fsm.name || "状态机")} <span class="section-meta">${esc(fsm.file || "")}</span></h3>
           <div class="fsm-wrap">${fsmSvg()}</div>
-          <p class="small muted" style="margin:8px 0 0">单击状态查看转移条件；复位与非法请求分支按源码标注。</p>
+          <p class="small muted" style="margin:8px 0 0">单击状态查看转移条件；分支与备注按源码标注。</p>
         </article>`
-      : `<div class="note amber" style="margin-top:12px">当前快照没有可追溯的状态机数据，本页不生成状态图。</div>`;
+      : "";
+    const transitions = fsm && Array.isArray(fsm.transitions) ? fsm.transitions : [];
+    const transitionRows = transitions.map((transition) =>
+      `<tr><td class="mono">${esc(transition.from || "—")}</td><td class="mono">${esc(transition.condition || "—")}</td><td class="mono">${esc(transition.to || "—")}</td><td>${esc(transition.note || transition.kind || "")}</td></tr>`
+    ).join("");
+    const transitionCard = transitionRows
+      ? `<article class="card" style="margin-top:12px">
+          <h3>状态与转移</h3>
+          <table class="t"><thead><tr><th>从</th><th>条件</th><th>到</th><th>备注</th></tr></thead><tbody>${transitionRows}</tbody></table>
+        </article>`
+      : "";
+    const empty = !scenarioCards && !fsmCard && !transitionCard
+      ? `<div class="note amber" style="margin-top:12px">当前快照没有可追溯的控制流数据；本页不生成示例状态或优先级。</div>`
+      : "";
     $("#main").innerHTML = `
-      <div class="page-h"><div><div class="ttl">控制流</div><div class="sub">有效位决定请求是否推进，ready 决定何时可以兑现。</div></div></div>
-      <div class="grid g3">
-        <article class="card"><h3>正常路径</h3><p class="small muted">req_valid 到达后检查操作码，合法请求进入执行层，完成后生成响应。</p><button type="button" class="btn sm" data-go="dataflow" data-scenario="request">跟踪正常请求 →</button></article>
-        <article class="card"><h3>反压路径</h3><p class="small muted">resp_ready 为 0 时保持 resp_valid，不重复生成新响应。</p><button type="button" class="btn sm" data-go="dataflow" data-scenario="backpressure">查看反压条件 →</button></article>
-        <article class="card"><h3>错误路径</h3><p class="small muted">操作码为 0 时产生错误码，不进入正常执行分支。</p><button type="button" class="btn sm" data-go="dataflow" data-scenario="error">查看错误路径 →</button></article>
-      </div>
+      <div class="page-h"><div><div class="ttl">控制流</div><div class="sub">有效、许可与完成条件怎样推进状态。</div></div></div>
+      ${scenarioCards ? `<div class="grid g3">${scenarioCards}</div>` : ""}
       ${fsmCard}
-      <article class="card" style="margin-top:12px">
-        <h3>状态与优先级</h3>
-        <table class="t"><thead><tr><th>条件</th><th>动作</th><th>目的</th></tr></thead><tbody>
-          <tr><td class="mono">!rst_n</td><td>route_state 回到 IDLE，清空有效位</td><td>确定性复位</td></tr>
-          <tr><td class="mono">req_error != 0</td><td>停留在 IDLE，不进入 ACTIVE</td><td>保护正常路径</td></tr>
-          <tr><td class="mono">work_valid && !work_ready</td><td>保持 ACTIVE 与 work_valid</td><td>支持下游反压</td></tr>
-          <tr><td class="mono">work_valid && work_ready</td><td>进入 DONE 并产生 work_done</td><td>推进下一笔</td></tr>
-        </tbody></table>
-      </article>`;
+      ${transitionCard}
+      ${empty}`;
   }
 
   function escapeRegExp(value) {
@@ -2193,21 +2435,38 @@
   }
 
   function renderCode() {
-    const file = D.files[state.codeFile] || D.files[Object.keys(D.files)[0]];
-    const lines = file.code.split("\n");
+    const fileNames = Object.keys(D.files);
+    if (!state.codeFile || !D.files[state.codeFile]) state.codeFile = fileNames[0] || "";
+    const file = D.files[state.codeFile];
+    if (!file) {
+      $("#main").innerHTML = `
+        <div class="page-h"><div><div class="ttl">代码导航</div><div class="sub">从信号、模块或源码入口定位。</div></div><span class="chip">无源码</span></div>
+        <article class="card"><h3>当前快照没有可读取的源码文件</h3><p class="small muted">补充 data.files 后本页再提供代码定位；不生成示例代码。</p></article>`;
+      return;
+    }
+    const lines = String(file.code || "").replace(/\r\n?/g, "\n").split("\n");
     const declaredSymbols = window.SigSem
       ? window.SigSem.symbols(state.codeFile)
       : new Set();
+    const shortcuts = (Array.isArray(D.codeShortcuts) && D.codeShortcuts.length
+      ? D.codeShortcuts
+      : D.modules
+        .filter((module) => module.file && D.files[module.file])
+        .slice(0, 3)
+        .map((module) => ({
+          label: module.label || module.name,
+          file: module.file,
+          line: module.start || 1
+        }))
+    ).filter((item) => item && item.file && D.files[item.file]).slice(0, 4);
     $("#main").innerHTML = `
       <div class="page-h"><div><div class="ttl">代码导航</div><div class="sub">从信号、模块或源码入口定位。</div></div><span class="chip">${esc(state.codeFile)}</span></div>
       <div class="code-bar">
         <label for="codeFileSelect">源码文件</label>
-        <select class="search" id="codeFileSelect">${Object.keys(D.files).map((name) => `<option${name === state.codeFile ? " selected" : ""}>${esc(name)}</option>`).join("")}</select>
+        <select class="search" id="codeFileSelect">${fileNames.map((name) => `<option${name === state.codeFile ? " selected" : ""}>${esc(name)}</option>`).join("")}</select>
         <input class="search" id="codeSearch" style="width:170px" value="${esc(state.codeQuery)}" placeholder="搜索标识符…" autocomplete="off" spellcheck="false" title="回车下一处，Shift+回车上一处" aria-label="搜索代码标识符">
         <span class="tiny dim2" id="codeHits"></span>
-        <button type="button" class="btn sm" data-code="demo_pipeline.sv" data-line="17">输入检查实例</button>
-        <button type="button" class="btn sm" data-code="work_router.sv" data-line="27">状态转移</button>
-        <button type="button" class="btn sm" data-code="response_stage.sv" data-line="11">响应保持</button>
+        ${shortcuts.map((item) => `<button type="button" class="btn sm" data-code="${esc(item.file)}" data-line="${Number(item.line) || 1}">${esc(item.label || item.file)}</button>`).join("")}
         ${signalNavHtml()}
       </div>
       <div class="code-wrap">
@@ -2288,27 +2547,50 @@ end</pre>
   }
 
   function renderVerify() {
-    const summary = D.validation.summary;
+    const validation = D.validation;
+    const summary = validation && validation.summary;
+    if (!summary) {
+      $("#main").innerHTML = `
+        <div class="page-h"><div><div class="ttl">仿真验证</div><div class="sub">只记录实际执行过的检查，并单列未覆盖边界。</div></div><span class="chip">无可用报告</span></div>
+        <article class="card"><h3>当前快照没有附带验证报告</h3><p class="small muted">不生成通过率、覆盖率或断言数量；补充真实报告后再展示。</p></article>`;
+      return;
+    }
+    const benches = Array.isArray(validation.benches) ? validation.benches : [];
+    const notCovered = Array.isArray(validation.notCovered) ? validation.notCovered : [];
+    const source = validation.source || D.meta.validationSource || "报告";
+    const statDefs = [
+      ["benches", "测试平台"],
+      ["cases", "场景"],
+      ["checks", "断言"],
+      ["waveforms", "波形"]
+    ];
+    const stats = statDefs
+      .filter(([key]) => summary[key] != null)
+      .map(([key, label]) =>
+        `<div class="card stat"><div class="v">${esc(summary[key])}</div><div class="l">${esc(label)}</div><div class="s">${esc(source)}</div></div>`
+      ).join("");
     $("#main").innerHTML = `
-      <div class="page-h"><div><div class="ttl">仿真验证</div><div class="sub">只记录实际执行过的检查，并单列未覆盖边界。</div></div><span class="chip">${esc(summary.status)}</span></div>
-      <div class="grid g4">
-        <div class="card stat"><div class="v">${summary.benches}</div><div class="l">测试平台</div><div class="s">模板示例</div></div>
-        <div class="card stat"><div class="v">${summary.cases}</div><div class="l">场景</div><div class="s">模板示例</div></div>
-        <div class="card stat"><div class="v">${summary.checks}</div><div class="l">断言</div><div class="s">模板示例</div></div>
-        <div class="card stat"><div class="v">0</div><div class="l">真实波形</div><div class="s">未附带工程数据</div></div>
-      </div>
+      <div class="page-h"><div><div class="ttl">仿真验证</div><div class="sub">只记录实际执行过的检查，并单列未覆盖边界。</div></div><span class="chip">${esc(summary.status || "已记录")}</span></div>
+      ${stats ? `<div class="grid g4">${stats}</div>` : ""}
       <section style="margin-top:14px">
-        ${D.validation.benches.map((bench, index) => `<article class="bench${state.bench === index ? " open" : ""}">
+        ${benches.map((bench, index) => {
+          const cases = Array.isArray(bench.cases) ? bench.cases : [];
+          return `<article class="bench${state.bench === index ? " open" : ""}">
           <button type="button" class="bench-h" data-bench="${index}" style="border:0;background:none;width:100%;text-align:left">
-            <span class="nm">${esc(bench.name)}</span><span class="purpose">${esc(bench.purpose)}</span><span class="cnt">${bench.cases.length} 项</span>
+            <span class="nm">${esc(bench.name || "测试平台")}</span><span class="purpose">${esc(bench.purpose || "")}</span><span class="cnt">${cases.length} 项</span>
           </button>
-          <div class="bench-b">${bench.cases.map((item, i) => `<div class="case"><span class="id">C${i + 1}</span><span class="t">${esc(item)}</span><span class="p">模板中的示例检查项</span></div>`).join("")}</div>
-        </article>`).join("")}
+          <div class="bench-b">${cases.map((item, i) => {
+            const title = typeof item === "string" ? item : (item.title || item.name || "");
+            const note = typeof item === "string" ? "" : (item.note || "");
+            return `<div class="case"><span class="id">C${i + 1}</span><span class="t">${esc(title)}</span><span class="p">${esc(note)}</span></div>`;
+          }).join("")}</div>
+        </article>`;
+        }).join("")}
       </section>
-      <details class="card fold-card">
+      ${notCovered.length ? `<details class="card fold-card">
         <summary>本页未覆盖的范围</summary>
-        <div class="fold-content"><ul class="hlist">${D.validation.notCovered.map((item) => `<li>${esc(item)}</li>`).join("")}</ul></div>
-      </details>`;
+        <div class="fold-content"><ul class="hlist">${notCovered.map((item) => `<li>${esc(item)}</li>`).join("")}</ul></div>
+      </details>` : ""}`;
   }
 
   function inspectModule(name, reveal = true) {
@@ -2331,7 +2613,7 @@ end</pre>
       <div class="i-sec"><h5>结构</h5><table class="t insp-kv"><tbody>
         ${parent}
         <tr><td>子模块</td><td>${children.length ? children.map((item) => esc(item.name)).join("、") : "—"}</td></tr>
-        <tr><td>端口</td><td>${module.ports.length} 个</td></tr>
+        <tr><td>端口</td><td>${(module.ports || []).length} 个</td></tr>
         <tr><td>内部单元</td><td>${units.length ? units.map((item) => esc(item.name)).join("、") : "—"}</td></tr>
         <tr><td>存储</td><td>${module.storage ? `${module.storage.length} 项` : "—"}</td></tr>
       </tbody></table></div>
@@ -2536,17 +2818,25 @@ end</pre>
     else if (moduleByName(edge.from)) state.module = edge.from;
     else if (moduleByName(edge.to)) state.module = edge.to;
     state.inspect = { type: "edge", id };
+    const actualFrom = edge.originalFrom || edge.from;
+    const actualTo = edge.originalTo || edge.to;
     const fromLabel = edge.module
-      ? internalNodeLabel(edge.module, edge.from)
-      : nodeLabel(edge.from);
+      ? internalNodeLabel(edge.module, actualFrom)
+      : nodeLabel(actualFrom);
     const toLabel = edge.module
-      ? internalNodeLabel(edge.module, edge.to)
-      : nodeLabel(edge.to);
+      ? internalNodeLabel(edge.module, actualTo)
+      : nodeLabel(actualTo);
+    const aggregationNote = edge.boundary
+      ? `<p class="small muted">当前层级图中显示 ${esc(nodeLabel(edge.from))} → ${esc(nodeLabel(edge.to))}；真实连接端点是 ${esc(actualFrom)} → ${esc(actualTo)}，跨越了当前模块边界。</p>`
+      : edge.aggregated
+        ? `<p class="small muted">当前层级图中显示 ${esc(nodeLabel(edge.from))} → ${esc(nodeLabel(edge.to))}；真实连接端点是 ${esc(actualFrom)} → ${esc(actualTo)}，跨越了当前层级的子模块。</p>`
+        : "";
     $("#inspType").textContent = "连线依据";
     $("#inspBody").innerHTML = `
       <div class="i-title">${esc(fromLabel)} → ${esc(toLabel)}</div>
       <div class="i-sub">${esc(kindLabels[edge.kind] || edge.kind)} · ${esc(edge.label)}</div>
       <p class="insp-summary">${edge.module ? "这条内部连线对应单元之间的赋值、选择或使能关系。" : "这条连线是实例端口映射或赋值关系的聚合，不表示每一拍都发生传输。"}展开源码依据可核对实际信号。</p>
+      ${aggregationNote}
       <div class="i-sec"><h5>经过的信号</h5><div class="row">${signalChips(edge.signals)}</div></div>
       <div class="i-sec"><h5>源码依据</h5>${evidenceHtml(edge.evidence)}</div>
       <div class="i-actions"><button type="button" class="btn sm" data-go="structure"${edge.module ? ` data-focus-module="${esc(edge.module)}"` : ""}>回到结构图</button></div>`;
@@ -2793,22 +3083,18 @@ end</pre>
         state.codeLine = Number(row.dataset.line);
         state.codeJump = state.codeLine;
       }
-      if (event.ctrlKey || event.metaKey) {
-        event.preventDefault();
-        inspectSignal(signal.dataset.signal, false, originFile);
-        if (state.tab === "code") renderCode();
-        else renderMain();
-        openSignalSnippets(signal.dataset.signal, event, {
-          file: originFile || state.codeFile,
-          line: originLine
-        });
-        return;
-      }
-      inspectSignal(signal.dataset.signal, state.tab !== "code", originFile);
+      const codeToken = Boolean(signal.closest("#codeBody .src"));
+      inspectSignal(signal.dataset.signal, true, originFile);
       if (state.tab === "code") renderCode();
       if ((state.tab === "overview" || state.tab === "structure") && previousModule !== state.module) {
         if (state.tab === "structure") state.focus = state.module;
         renderMain();
+      }
+      if (codeToken) {
+        openSignalSnippets(signal.dataset.signal, event, {
+          file: originFile || state.codeFile,
+          line: originLine
+        });
       }
       return;
     }
@@ -2880,5 +3166,6 @@ end</pre>
   $("#panelBackdrop").addEventListener("click", closePanels);
 
   applyStoredTheme();
+  applyBrand();
   renderMain();
 }());

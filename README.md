@@ -74,7 +74,7 @@ RTL Reading Web 换了一个交付物：**不是文档，是工作台**。
 
 信号、常量、模块和关键条件都可以定位到真实源码。信号位宽从声明和 `localparam/parameter` 表达式解析，标量无范围声明为 1 bit，数组则把 packed 范围解析为元素位宽、unpacked 范围解析为深度，例如 `64 bit × 8 项`；`ram_style` 等属性前缀不会妨碍识别，也不会被当成 BRAM 综合结论。不从赋值字面量或相邻总线推断宽度。常量按编译期对象解释；`parameter` 还会列出上级实例、`#(...)` 覆盖表达式、默认/覆盖采用结论，`localparam` 明确不可覆盖。从详情跳到代码或证据行时，右栏保持当前对象，不会切回模块上下文。跳转后目录同步、目标行在代码容器内居中并高亮；选中模块后进入代码导航，会打开该模块文件并定位起始行。标识符搜索会显示命中次数并把首个结果居中，`Enter`/`Shift+Enter` 逐处循环、`Escape` 清空；导航条常驻并同步更新信号名。选中信号后可用“本文件 上一处 / 下一处 / 复制位置”逐处跳转，同名信号不会把导航带到其他 `.v`；代码依据按文件行号去重。未登记在展示索引、但源码中已声明的数组/寄存器同样能在左栏搜索、点击并查看详情。代码字体栈含中文回退，注释保持正体，避免锐利回退字形和合成斜体。
 
-选中信号后可打开“相关片段”，或直接 `Ctrl+单击`（macOS `Cmd+单击`）信号词元。卡片按模块分组，优先当前和来源模块；每个片段显示真实 `file:line` 与五行上下文。悬停片段会在侧边展开完整源码预览，沿用语法着色并把目标行居中；单击片段跳转，点击空白或按 `Escape` 关闭。片段是源码位置证据，不是形式化连接证明。
+代码页直接单击信号词元即可选中信号、更新右栏详情并打开“相关片段”卡；`Ctrl/Cmd+单击` 只是兼容快捷键，不再是唯一入口。卡片按模块分组，优先当前和来源模块；每个片段显示真实 `file:line` 与五行上下文。悬停片段会在侧边展开完整源码预览，沿用语法着色并把目标行居中；单击片段跳转，点击空白或按 `Escape` 关闭。片段是源码位置证据，不是形式化连接证明。
 
 ![代码导航：按模块分组的源码片段卡](docs/screenshots/code-evidence.png)
 
@@ -207,6 +207,7 @@ doc/rtl-reading-web/
 ├── index.html
 ├── style.css
 ├── data.js
+├── data-resolver.js
 ├── semantics.js
 ├── wave-core.js
 ├── wave.js
@@ -216,6 +217,8 @@ doc/rtl-reading-web/
 ```
 
 `wave-vcd.js` 只在有真实 VCD 时生成，保存只读的 VCD 文本全局变量；没有波形时删掉。`source-manifest.json` 记录顶层、参数/宏配置、文件逻辑路径、SHA-256 和生成时间。页面里的源码、行号、层级、端口映射和信号说明都绑定同一份快照；源码更新后需要重新核对，而不是只替换文字。
+
+`data.js` 的字段是通用阅读器契约，不是 `demo_pipeline` 的业务模型。任意 RTL 工程按 [`references/data-contract.md`](references/data-contract.md) 填充模块、文件、信号和可选页面数据即可；参考页的虚构属性和标题只存在于其 `data.js`。
 
 ---
 
@@ -267,9 +270,12 @@ rtl-reading-web/
 ├── agents/openai.yaml           # 宿主展示信息
 ├── references/
 │   ├── rtl-evidence.md          # 语义与证据分级
+│   ├── data-contract.md         # data.js 字段、默认值与空状态
 │   ├── reading-design.md        # 页面与信息设计
 │   ├── acceptance.md            # 验收标准
 │   └── portability.md           # 迁移、分享与脱敏
+├── scripts/
+│   └── verify_reader.cjs        # 无依赖的无头 DOM 验收脚本
 ├── assets/reference-reader/     # 可离线打开的参考工作台
 ├── LICENSE
 └── README.md

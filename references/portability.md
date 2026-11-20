@@ -31,7 +31,8 @@
 
 - 将待发布包复制或解压到一个不同位置，仅以新目录中的文件检查相对链接和资产存在性。
 - 检查全部文本严格 UTF-8 无 BOM，引用路径无盘符、家目录、原作者目录或外部资源依赖。
-- 核对参考页的内嵌源码行号、文件跳转和基础资源（`index.html`、`style.css`、`data.js`、`semantics.js`、`wave-core.js`、`wave.js`、`app.js`）完整可用。
+- 核对参考页的内嵌源码行号、文件跳转和基础资源（`index.html`、`style.css`、`data.js`、`data-resolver.js`、`semantics.js`、`wave-core.js`、`wave.js`、`app.js`）完整可用；数据字段边界见 [数据模型契约](data-contract.md)。
+- 核对 `data.js` 导出 `window.RTL_READING_DATA`，或明确设置 `window.RTL_READING_DATA_GLOBAL`；`data-resolver.js` 必须在语义脚本和应用脚本之前加载。多个候选对象时只接受显式配置，自动扫描不得静默选择。不得把 `window.DEMO`、`window.OA` 或作者工程名写回运行时脚本。
 - 有 VCD 的页面另检查 `wave-vcd.js` 或等价的只读全局变量；它包含波形内容，转发前必须确认已脱敏。没有 VCD 时不要保留空的或伪造的波形脚本。
 - 以承诺的打开方式测试参考页。依赖相对脚本且没有 fetch/模块加载时可双击打开；若验证工具限制本地 URL，明确记录限制，不能冒充已通过。
 - 审阅参考内容确实来自合成示例；关键词扫描只能发现已知名称，不能独立证明业务内容已脱敏。

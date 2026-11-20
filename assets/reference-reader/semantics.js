@@ -1,8 +1,16 @@
 (function () {
   "use strict";
 
-  const D = window.DEMO || window.OA;
-  if (!D) return;
+  const D = window.RTLReaderData
+    ? window.RTLReaderData.resolve()
+    : window.RTL_READING_DATA;
+  if (!D) {
+    const detail = window.RTLReaderData && window.RTLReaderData.errorMessage
+      ? window.RTLReaderData.errorMessage()
+      : "没有找到包含 modules 和 files 的数据对象。";
+    console.error("[RTL reader] 语义分析未启动：" + detail);
+    return;
+  }
 
   const fileLineCache = new Map();
   const positionCache = new Map();

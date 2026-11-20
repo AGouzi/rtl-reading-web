@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>demo_pipeline · RTL 阅读工作台</title>
+<title>RTL 阅读工作台</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 <script>
 (function(){
   try{
-    var t = localStorage.getItem('demo-reader-theme');
+    var t = localStorage.getItem('rtl-reader-theme');
     if(!t) t = 'light';
     document.documentElement.dataset.theme = (t === 'dark' ? 'dark' : 'light');
   }catch(e){ document.documentElement.dataset.theme = 'light'; }
@@ -19,10 +19,10 @@
 <body>
 <header class="topbar">
   <div class="brand">
-    <div class="logo">DP</div>
+    <div class="logo">RTL</div>
     <div class="brand-txt">
-      <div class="t1">demo_pipeline</div>
-      <div class="t2">RTL 阅读工作台</div>
+      <div class="t1">RTL</div>
+      <div class="t2">代码阅读工作台</div>
     </div>
   </div>
   <button class="btn sm panel-toggle" id="navToggle" aria-controls="sidebar" aria-expanded="false">目录</button>
@@ -69,6 +69,7 @@
 </footer>
 
 <script src="data.js"></script>
+<script src="data-resolver.js"></script>
 <script src="semantics.js"></script>
 <script src="wave-core.js"></script>
 <script src="wave.js"></script>

@@ -153,7 +153,7 @@
     if (time === 0) lines.push("$end");
   }
 
-  window.DEMO_WAVE_META = {
+  window.REF_WAVE_META = {
     file: "demo_pipeline_tb.vcd",
     simulator: "Icarus Verilog（虚构演示）",
     timescale: "1ns",
@@ -161,5 +161,5 @@
     note: "仅用于演示查看器交互，不是实际仿真结果。",
     fictional: true
   };
-  window.DEMO_WAVE_VCD = lines.join("\n");
+  window.REF_WAVE_VCD = lines.join("\n");
 })();
